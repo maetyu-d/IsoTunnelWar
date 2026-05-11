@@ -3,9 +3,9 @@
 A native C++/Win32 prototype for a turn-based isometric tunnelling game.
 
 The current build generates a bounded `24x24x24` cube world with procedural
-heightfields carved into every face. A spherical player marker can be selected
-with the mouse, then moved or tunnelled through the voxel terrain using
-highlighted options.
+heightfields carved into every face. Each side controls three spherical units;
+living units can be selected with the mouse, then moved or tunnelled through
+the voxel terrain using highlighted options.
 
 ## Build
 
@@ -20,7 +20,7 @@ C++ workload installed.
 
 ## Controls
 
-- Click the active sphere to select it.
+- Click any living sphere on the active side to select it.
 - Click a highlighted green cell to move.
 - Click a highlighted orange cell to tunnel one block.
 - Blue and red players each get two actions before turns swap.

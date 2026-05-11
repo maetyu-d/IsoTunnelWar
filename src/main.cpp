@@ -39,6 +39,8 @@ constexpr int kFootprintH = 16;
 constexpr int kHalfW = kFootprintW / 2;
 constexpr int kHalfH = kFootprintH / 2;
 constexpr int kWorldSize = 24;
+constexpr int kPlayers = 2;
+constexpr int kSpheresPerPlayer = 3;
 constexpr double kActorScale = 1.0;
 
 const wchar_t* kClassName = L"InfiniteIsoMiddleEarthWindow";
@@ -95,6 +97,7 @@ struct Player {
     int x = 0;
     int y = 0;
     int z = 0;
+    bool alive = true;
     std::wstring facing = L"S";
     std::wstring sprite = L"sphere-blue";
 };
@@ -116,8 +119,9 @@ struct AppState {
     double dragCameraY = 0.0;
     int turn = 0;
     int activePlayer = 0;
+    int activeSphere = 0;
     int actionsThisPlayer = 0;
-    Player players[2];
+    Player players[kPlayers][kSpheresPerPlayer];
     int view[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
     int viewTurns = 0;
     bool playerSelected = false;
@@ -131,11 +135,24 @@ AppState gApp;
 ULONG_PTR gGdiToken = 0;
 
 Player& ActivePlayer() {
-    return gApp.players[gApp.activePlayer];
+    return gApp.players[gApp.activePlayer][gApp.activeSphere];
 }
 
 const Player& ActivePlayerConst() {
-    return gApp.players[gApp.activePlayer];
+    return gApp.players[gApp.activePlayer][gApp.activeSphere];
+}
+
+int FirstLivingSphere(int playerIndex) {
+    for (int i = 0; i < kSpheresPerPlayer; ++i) {
+        if (gApp.players[playerIndex][i].alive) return i;
+    }
+    return 0;
+}
+
+void SetActiveSphere(int sphereIndex) {
+    if (sphereIndex < 0 || sphereIndex >= kSpheresPerPlayer) return;
+    if (!gApp.players[gApp.activePlayer][sphereIndex].alive) return;
+    gApp.activeSphere = sphereIndex;
 }
 
 std::wstring ExeDirectory() {
@@ -775,8 +792,9 @@ void DrawTunnelCell(Graphics& graphics, int x, int y, int z, bool occupied) {
     }
 }
 
-void DrawPlayerSphere(Graphics& graphics, int playerIndex) {
-    const Player& player = gApp.players[playerIndex];
+void DrawPlayerSphere(Graphics& graphics, int playerIndex, int sphereIndex) {
+    const Player& player = gApp.players[playerIndex][sphereIndex];
+    if (!player.alive) return;
     Bitmap* image = ImageFor(L"actor", {player.sprite});
     const float drawW = static_cast<float>((image ? image->GetWidth() : 18) * kActorScale * gApp.zoom);
     const float drawH = static_cast<float>((image ? image->GetHeight() : 18) * kActorScale * gApp.zoom);
@@ -786,13 +804,13 @@ void DrawPlayerSphere(Graphics& graphics, int playerIndex) {
     const bool underground = InWorldCube(player.x, player.y, player.z) &&
                              NaturalSolidBlockAt(player.x, player.y, player.z);
 
-    if (underground || playerIndex == gApp.activePlayer) {
+    const bool activeSphere = playerIndex == gApp.activePlayer && sphereIndex == gApp.activeSphere;
+    if (underground || activeSphere) {
         RectF halo(bounds.X - 4.0f * static_cast<float>(gApp.zoom),
                    bounds.Y - 4.0f * static_cast<float>(gApp.zoom),
                    bounds.Width + 8.0f * static_cast<float>(gApp.zoom),
                    bounds.Height + 8.0f * static_cast<float>(gApp.zoom));
-        SolidBrush glow(playerIndex == gApp.activePlayer ? Color(120, 250, 230, 120)
-                                                         : Color(90, 85, 180, 255));
+        SolidBrush glow(activeSphere ? Color(120, 250, 230, 120) : Color(90, 85, 180, 255));
         Pen ring(playerIndex == 0 ? Color(235, 170, 220, 255) : Color(235, 255, 150, 150), 2.0f);
         graphics.FillEllipse(&glow, halo);
         graphics.DrawEllipse(&ring, halo);
@@ -831,15 +849,16 @@ void DrawHud(Graphics& graphics, int visibleCount) {
 
     wchar_t stats[256] = {};
     const Player& player = ActivePlayerConst();
-    swprintf_s(stats, L"cube: %dx%dx%d    turn: %d    active: P%d action:%d/2    player: %d,%d,%d    90deg turns:%d    dug: %zu    visible: %d    zoom: %.2fx",
+    swprintf_s(stats, L"cube: %dx%dx%d    turn: %d    active: P%d.%d action:%d/2    sphere: %d,%d,%d    90deg turns:%d    dug: %zu    visible: %d    zoom: %.2fx",
                kWorldSize, kWorldSize, kWorldSize,
-               gApp.turn, gApp.activePlayer + 1, gApp.actionsThisPlayer + 1, player.x, player.y, player.z,
+               gApp.turn, gApp.activePlayer + 1, gApp.activeSphere + 1, gApp.actionsThisPlayer + 1,
+               player.x, player.y, player.z,
                PositiveMod(gApp.viewTurns, 24),
                gApp.removedBlocks.size(), visibleCount, gApp.zoom);
     graphics.DrawString(stats, -1, &hudFont, PointF(300, 46), &muted);
 
     graphics.FillRectangle(&panel, RectF(18, static_cast<float>(gApp.height - 64), 520, 46));
-    graphics.DrawString(L"Click active sphere | Green move | Orange tunnel | WASD rotate 90 degrees | Drag pan",
+    graphics.DrawString(L"Click any active-side sphere | Green move | Orange tunnel | WASD rotate 90 degrees | Drag pan",
                         -1, &hudFont, PointF(34, static_cast<float>(gApp.height - 50)), &muted);
 }
 
@@ -937,8 +956,17 @@ void DrawScene(HDC hdc) {
         }
     }
 
-    DrawPlayerSphere(graphics, 1 - gApp.activePlayer);
-    DrawPlayerSphere(graphics, gApp.activePlayer);
+    for (int playerIndex = 0; playerIndex < kPlayers; ++playerIndex) {
+        if (playerIndex == gApp.activePlayer) continue;
+        for (int sphereIndex = 0; sphereIndex < kSpheresPerPlayer; ++sphereIndex) {
+            DrawPlayerSphere(graphics, playerIndex, sphereIndex);
+        }
+    }
+    for (int sphereIndex = 0; sphereIndex < kSpheresPerPlayer; ++sphereIndex) {
+        if (sphereIndex == gApp.activeSphere) continue;
+        DrawPlayerSphere(graphics, gApp.activePlayer, sphereIndex);
+    }
+    DrawPlayerSphere(graphics, gApp.activePlayer, gApp.activeSphere);
 
     int visibleCount = 0;
     for (const RenderTile& renderTile : renderTiles) {
@@ -981,8 +1009,8 @@ void CenterCameraOnPlayer() {
     gApp.cameraY = ((view.x + view.y) * ViewHalfH() - view.z * ViewLayerH()) * gApp.zoom;
 }
 
-RectF ActorBounds(int playerIndex) {
-    const Player& player = gApp.players[playerIndex];
+RectF ActorBounds(int playerIndex, int sphereIndex) {
+    const Player& player = gApp.players[playerIndex][sphereIndex];
     Bitmap* image = ImageFor(L"actor", {player.sprite});
     const float drawW = static_cast<float>((image ? image->GetWidth() : 18) * kActorScale * gApp.zoom);
     const float drawH = static_cast<float>((image ? image->GetHeight() : 18) * kActorScale * gApp.zoom);
@@ -1045,6 +1073,7 @@ void EndTurn() {
     if (gApp.actionsThisPlayer >= 2) {
         gApp.actionsThisPlayer = 0;
         gApp.activePlayer = 1 - gApp.activePlayer;
+        gApp.activeSphere = FirstLivingSphere(gApp.activePlayer);
     }
     ClearSelection();
     CenterCameraOnPlayer();
@@ -1131,9 +1160,15 @@ void RotateViewDown() {
 void HandleLeftClick(int screenX, int screenY) {
     if (gApp.playerSelected && TryExecuteClickedOption(screenX, screenY)) return;
 
-    if (PointInRect(ActorBounds(gApp.activePlayer), screenX, screenY)) {
-        SelectPlayer();
-        return;
+    for (int sphereIndex = kSpheresPerPlayer - 1; sphereIndex >= 0; --sphereIndex) {
+        const Player& player = gApp.players[gApp.activePlayer][sphereIndex];
+        if (!player.alive) continue;
+        if (PointInRect(ActorBounds(gApp.activePlayer, sphereIndex), screenX, screenY)) {
+            SetActiveSphere(sphereIndex);
+            SelectPlayer();
+            CenterCameraOnPlayer();
+            return;
+        }
     }
 
     ClearSelection();
@@ -1148,11 +1183,15 @@ void RandomizeSeed() {
     gApp.seedHash = HashString(gApp.seedText);
     gApp.removedBlocks.clear();
     gApp.tunnelOwners.clear();
-    gApp.players[0] = {kWorldSize / 2 - 2, kWorldSize / 2, 0, L"S", L"sphere-blue"};
-    gApp.players[0].z = TopSurfaceZ(gApp.players[0].x, gApp.players[0].y) + 1;
-    gApp.players[1] = {kWorldSize / 2 + 2, kWorldSize / 2, 0, L"S", L"sphere-red"};
-    gApp.players[1].z = TopSurfaceZ(gApp.players[1].x, gApp.players[1].y) + 1;
+    for (int i = 0; i < kSpheresPerPlayer; ++i) {
+        const int offsetY = i - 1;
+        gApp.players[0][i] = {kWorldSize / 2 - 4, kWorldSize / 2 + offsetY * 2, 0, true, L"S", L"sphere-blue"};
+        gApp.players[0][i].z = TopSurfaceZ(gApp.players[0][i].x, gApp.players[0][i].y) + 1;
+        gApp.players[1][i] = {kWorldSize / 2 + 4, kWorldSize / 2 + offsetY * 2, 0, true, L"S", L"sphere-red"};
+        gApp.players[1][i].z = TopSurfaceZ(gApp.players[1][i].x, gApp.players[1][i].y) + 1;
+    }
     gApp.activePlayer = 0;
+    gApp.activeSphere = 0;
     gApp.actionsThisPlayer = 0;
     gApp.turn = 0;
     ClearSelection();
@@ -1166,11 +1205,15 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
             gApp.hwnd = hwnd;
             gApp.seedHash = HashString(gApp.seedText);
             LoadImages();
-            gApp.players[0] = {kWorldSize / 2 - 2, kWorldSize / 2, 0, L"S", L"sphere-blue"};
-            gApp.players[0].z = TopSurfaceZ(gApp.players[0].x, gApp.players[0].y) + 1;
-            gApp.players[1] = {kWorldSize / 2 + 2, kWorldSize / 2, 0, L"S", L"sphere-red"};
-            gApp.players[1].z = TopSurfaceZ(gApp.players[1].x, gApp.players[1].y) + 1;
+            for (int i = 0; i < kSpheresPerPlayer; ++i) {
+                const int offsetY = i - 1;
+                gApp.players[0][i] = {kWorldSize / 2 - 4, kWorldSize / 2 + offsetY * 2, 0, true, L"S", L"sphere-blue"};
+                gApp.players[0][i].z = TopSurfaceZ(gApp.players[0][i].x, gApp.players[0][i].y) + 1;
+                gApp.players[1][i] = {kWorldSize / 2 + 4, kWorldSize / 2 + offsetY * 2, 0, true, L"S", L"sphere-red"};
+                gApp.players[1][i].z = TopSurfaceZ(gApp.players[1][i].x, gApp.players[1][i].y) + 1;
+            }
             gApp.activePlayer = 0;
+            gApp.activeSphere = 0;
             gApp.actionsThisPlayer = 0;
             CenterCameraOnPlayer();
             return 0;
