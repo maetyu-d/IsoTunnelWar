@@ -20,9 +20,11 @@ C++ workload installed.
 
 ## Controls
 
-- Click the sphere to select it.
+- Click the active sphere to select it.
 - Click a highlighted green cell to move.
 - Click a highlighted orange cell to tunnel one block.
+- Blue and red players alternate turns after each move or tunnel.
+- The camera recenters on the player whose turn it is.
 - Press `WASD` to rotate the cube in 90 degree increments.
 - Drag with the left mouse button to pan.
 - Use the mouse wheel to zoom, up to `5x`.

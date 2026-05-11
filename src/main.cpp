@@ -91,6 +91,14 @@ struct MoveOption {
     std::wstring facing = L"S";
 };
 
+struct Player {
+    int x = 0;
+    int y = 0;
+    int z = 0;
+    std::wstring facing = L"S";
+    std::wstring sprite = L"sphere-blue";
+};
+
 struct AppState {
     HWND hwnd = nullptr;
     int width = 1280;
@@ -106,14 +114,12 @@ struct AppState {
     POINT dragStart = {};
     double dragCameraX = 0.0;
     double dragCameraY = 0.0;
-    int playerX = 0;
-    int playerY = 0;
-    int playerZ = 0;
     int turn = 0;
+    int activePlayer = 0;
+    Player players[2];
     int view[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
     int viewTurns = 0;
     bool playerSelected = false;
-    std::wstring playerFacing = L"S";
     std::vector<MoveOption> moveOptions;
     std::unordered_map<std::wstring, std::unique_ptr<Bitmap>> images;
     std::unordered_set<std::wstring> removedBlocks;
@@ -121,6 +127,14 @@ struct AppState {
 
 AppState gApp;
 ULONG_PTR gGdiToken = 0;
+
+Player& ActivePlayer() {
+    return gApp.players[gApp.activePlayer];
+}
+
+const Player& ActivePlayerConst() {
+    return gApp.players[gApp.activePlayer];
+}
 
 std::wstring ExeDirectory() {
     wchar_t path[MAX_PATH] = {};
@@ -515,7 +529,7 @@ std::unique_ptr<Bitmap> CropToAlpha(Bitmap* source) {
     return std::unique_ptr<Bitmap>(source->Clone(sourceRect, PixelFormat32bppPARGB));
 }
 
-std::unique_ptr<Bitmap> CreateSphereSprite() {
+std::unique_ptr<Bitmap> CreateSphereSprite(BYTE baseR, BYTE baseG, BYTE baseB) {
     constexpr int size = 18;
     auto sprite = std::make_unique<Bitmap>(size, size, PixelFormat32bppPARGB);
     for (int y = 0; y < size; ++y) {
@@ -532,9 +546,9 @@ std::unique_ptr<Bitmap> CreateSphereSprite() {
                                                            std::pow(ny + 0.48, 2.0)),
                                            0.0, 1.0);
             const double shade = Clamp(1.0 - distance * 0.72 + highlight * 0.38, 0.0, 1.0);
-            const BYTE r = static_cast<BYTE>(52 + shade * 105);
-            const BYTE g = static_cast<BYTE>(92 + shade * 130);
-            const BYTE b = static_cast<BYTE>(150 + shade * 95);
+            const BYTE r = static_cast<BYTE>(Clamp(baseR * 0.45 + shade * baseR * 0.80, 0.0, 255.0));
+            const BYTE g = static_cast<BYTE>(Clamp(baseG * 0.45 + shade * baseG * 0.80, 0.0, 255.0));
+            const BYTE b = static_cast<BYTE>(Clamp(baseB * 0.45 + shade * baseB * 0.80, 0.0, 255.0));
             sprite->SetPixel(x, y, Color(255, r, g, b));
         }
     }
@@ -562,7 +576,8 @@ void LoadImages() {
         }
     }
 
-    gApp.images.emplace(TilePath(L"actor", {L"sphere"}), CreateSphereSprite());
+    gApp.images.emplace(TilePath(L"actor", {L"sphere-blue"}), CreateSphereSprite(80, 150, 235));
+    gApp.images.emplace(TilePath(L"actor", {L"sphere-red"}), CreateSphereSprite(235, 70, 70));
 
     if (gApp.images.empty()) {
         MessageBoxW(gApp.hwnd, tileDir.c_str(), L"Could not load Killer isometric tiles", MB_ICONERROR);
@@ -701,11 +716,13 @@ void DrawTunnelCell(Graphics& graphics, int x, int y, int z, bool occupied) {
     Pen linkPen(occupied ? Color(245, 255, 220, 120) : Color(205, 130, 235, 255), occupied ? 3.0f : 2.0f);
     Pen glowPen(Color(95, 25, 70, 130), occupied ? 6.0f : 4.0f);
     for (const Direction& direction : directions) {
+        const bool playerInNeighbor =
+            InWorldCube(ActivePlayerConst().x, ActivePlayerConst().y, ActivePlayerConst().z) &&
+            !SolidBlockAt(ActivePlayerConst().x, ActivePlayerConst().y, ActivePlayerConst().z) &&
+            x + direction.dx == ActivePlayerConst().x && y + direction.dy == ActivePlayerConst().y &&
+            z + direction.dz == ActivePlayerConst().z;
         if (!DugCellAt(x + direction.dx, y + direction.dy, z + direction.dz) &&
-            !(x + direction.dx == gApp.playerX && y + direction.dy == gApp.playerY &&
-              z + direction.dz == gApp.playerZ &&
-              InWorldCube(gApp.playerX, gApp.playerY, gApp.playerZ) &&
-              !SolidBlockAt(gApp.playerX, gApp.playerY, gApp.playerZ))) {
+            !playerInNeighbor) {
             continue;
         }
         const PointF neighbor = WorldToScreen3(x + direction.dx, y + direction.dy, z + direction.dz);
@@ -718,23 +735,25 @@ void DrawTunnelCell(Graphics& graphics, int x, int y, int z, bool occupied) {
     }
 }
 
-void DrawPlayerSphere(Graphics& graphics) {
-    Bitmap* image = ImageFor(L"actor", {L"sphere"});
+void DrawPlayerSphere(Graphics& graphics, int playerIndex) {
+    const Player& player = gApp.players[playerIndex];
+    Bitmap* image = ImageFor(L"actor", {player.sprite});
     const float drawW = static_cast<float>((image ? image->GetWidth() : 18) * kActorScale * gApp.zoom);
     const float drawH = static_cast<float>((image ? image->GetHeight() : 18) * kActorScale * gApp.zoom);
-    const PointF pos = WorldToScreen3(gApp.playerX, gApp.playerY, gApp.playerZ);
+    const PointF pos = WorldToScreen3(player.x, player.y, player.z);
     const RectF bounds(pos.X - drawW * 0.5f,
                        pos.Y + static_cast<float>(ViewHalfH() * gApp.zoom) - drawH, drawW, drawH);
-    const bool underground = InWorldCube(gApp.playerX, gApp.playerY, gApp.playerZ) &&
-                             NaturalSolidBlockAt(gApp.playerX, gApp.playerY, gApp.playerZ);
+    const bool underground = InWorldCube(player.x, player.y, player.z) &&
+                             NaturalSolidBlockAt(player.x, player.y, player.z);
 
-    if (underground) {
+    if (underground || playerIndex == gApp.activePlayer) {
         RectF halo(bounds.X - 4.0f * static_cast<float>(gApp.zoom),
                    bounds.Y - 4.0f * static_cast<float>(gApp.zoom),
                    bounds.Width + 8.0f * static_cast<float>(gApp.zoom),
                    bounds.Height + 8.0f * static_cast<float>(gApp.zoom));
-        SolidBrush glow(Color(115, 85, 180, 255));
-        Pen ring(Color(235, 180, 230, 255), 2.0f);
+        SolidBrush glow(playerIndex == gApp.activePlayer ? Color(120, 250, 230, 120)
+                                                         : Color(90, 85, 180, 255));
+        Pen ring(playerIndex == 0 ? Color(235, 170, 220, 255) : Color(235, 255, 150, 150), 2.0f);
         graphics.FillEllipse(&glow, halo);
         graphics.DrawEllipse(&ring, halo);
     }
@@ -771,14 +790,15 @@ void DrawHud(Graphics& graphics, int visibleCount) {
     graphics.DrawString(L"3D Island", -1, &titleFont, PointF(32, 46), &text);
 
     wchar_t stats[256] = {};
-    swprintf_s(stats, L"cube: %dx%dx%d    turn: %d    player: %d,%d,%d    90deg turns:%d    dug: %zu    visible: %d    zoom: %.2fx",
+    const Player& player = ActivePlayerConst();
+    swprintf_s(stats, L"cube: %dx%dx%d    turn: %d    active: P%d    player: %d,%d,%d    90deg turns:%d    dug: %zu    visible: %d    zoom: %.2fx",
                kWorldSize, kWorldSize, kWorldSize,
-               gApp.turn, gApp.playerX, gApp.playerY, gApp.playerZ, PositiveMod(gApp.viewTurns, 24),
+               gApp.turn, gApp.activePlayer + 1, player.x, player.y, player.z, PositiveMod(gApp.viewTurns, 24),
                gApp.removedBlocks.size(), visibleCount, gApp.zoom);
     graphics.DrawString(stats, -1, &hudFont, PointF(300, 46), &muted);
 
     graphics.FillRectangle(&panel, RectF(18, static_cast<float>(gApp.height - 64), 520, 46));
-    graphics.DrawString(L"Click sphere | Green move | Orange tunnel | WASD rotate 90 degrees | Drag pan",
+    graphics.DrawString(L"Click active sphere | Green move | Orange tunnel | WASD rotate 90 degrees | Drag pan",
                         -1, &hudFont, PointF(34, static_cast<float>(gApp.height - 50)), &muted);
 }
 
@@ -853,9 +873,9 @@ void DrawScene(HDC hdc) {
             tunnelCells.push_back({x, y, z, {}, L""});
         }
     }
-    if (InWorldCube(gApp.playerX, gApp.playerY, gApp.playerZ) &&
-        !SolidBlockAt(gApp.playerX, gApp.playerY, gApp.playerZ)) {
-        tunnelCells.push_back({gApp.playerX, gApp.playerY, gApp.playerZ, {}, L""});
+    const Player& active = ActivePlayerConst();
+    if (InWorldCube(active.x, active.y, active.z) && !SolidBlockAt(active.x, active.y, active.z)) {
+        tunnelCells.push_back({active.x, active.y, active.z, {}, L""});
     }
     std::sort(tunnelCells.begin(), tunnelCells.end(), [](const RenderTile& a, const RenderTile& b) {
         const double aDepth = ViewDepth(a.x, a.y, a.z);
@@ -867,7 +887,7 @@ void DrawScene(HDC hdc) {
     });
     for (const RenderTile& cell : tunnelCells) {
         DrawTunnelCell(graphics, cell.x, cell.y, cell.z,
-                       cell.x == gApp.playerX && cell.y == gApp.playerY && cell.z == gApp.playerZ);
+                       cell.x == active.x && cell.y == active.y && cell.z == active.z);
     }
 
     if (gApp.playerSelected) {
@@ -876,7 +896,8 @@ void DrawScene(HDC hdc) {
         }
     }
 
-    DrawPlayerSphere(graphics);
+    DrawPlayerSphere(graphics, 1 - gApp.activePlayer);
+    DrawPlayerSphere(graphics, gApp.activePlayer);
 
     int visibleCount = 0;
     for (const RenderTile& renderTile : renderTiles) {
@@ -913,16 +934,18 @@ void Pan(double dx, double dy, double multiplier) {
 }
 
 void CenterCameraOnPlayer() {
-    const Vec3 view = ViewTransform(gApp.playerX, gApp.playerY, gApp.playerZ);
+    const Player& player = ActivePlayerConst();
+    const Vec3 view = ViewTransform(player.x, player.y, player.z);
     gApp.cameraX = (view.x - view.y) * kHalfW * gApp.zoom;
     gApp.cameraY = ((view.x + view.y) * ViewHalfH() - view.z * ViewLayerH()) * gApp.zoom;
 }
 
-RectF ActorBounds() {
-    Bitmap* image = ImageFor(L"actor", {L"sphere"});
+RectF ActorBounds(int playerIndex) {
+    const Player& player = gApp.players[playerIndex];
+    Bitmap* image = ImageFor(L"actor", {player.sprite});
     const float drawW = static_cast<float>((image ? image->GetWidth() : 18) * kActorScale * gApp.zoom);
     const float drawH = static_cast<float>((image ? image->GetHeight() : 18) * kActorScale * gApp.zoom);
-    const PointF pos = WorldToScreen3(gApp.playerX, gApp.playerY, gApp.playerZ);
+    const PointF pos = WorldToScreen3(player.x, player.y, player.z);
     return RectF(pos.X - drawW * 0.5f,
                  pos.Y + static_cast<float>(ViewHalfH() * gApp.zoom) - drawH, drawW, drawH);
 }
@@ -933,6 +956,7 @@ bool PointInRect(const RectF& rect, int x, int y) {
 
 void BuildMoveOptions() {
     gApp.moveOptions.clear();
+    const Player& player = ActivePlayerConst();
     const struct Direction {
         int dx;
         int dy;
@@ -949,9 +973,9 @@ void BuildMoveOptions() {
 
     for (const Direction& direction : directions) {
         for (int distance = 1; distance <= 2; ++distance) {
-            const int x = gApp.playerX + direction.dx * distance;
-            const int y = gApp.playerY + direction.dy * distance;
-            const int z = gApp.playerZ + direction.dz * distance;
+            const int x = player.x + direction.dx * distance;
+            const int y = player.y + direction.dy * distance;
+            const int z = player.z + direction.dz * distance;
             if (!IsPlayableCell(x, y, z)) break;
 
             const bool tunnel = SolidBlockAt(x, y, z);
@@ -974,6 +998,13 @@ void ClearSelection() {
     gApp.moveOptions.clear();
 }
 
+void EndTurn() {
+    ++gApp.turn;
+    gApp.activePlayer = 1 - gApp.activePlayer;
+    ClearSelection();
+    CenterCameraOnPlayer();
+}
+
 bool EnterOrDig(int x, int y, int z, bool spendTurn) {
     if (!IsPlayableCell(x, y, z)) return false;
 
@@ -981,19 +1012,24 @@ bool EnterOrDig(int x, int y, int z, bool spendTurn) {
         RemoveBlockAt(x, y, z);
     }
 
-    gApp.playerX = x;
-    gApp.playerY = y;
-    gApp.playerZ = z;
-    if (spendTurn) ++gApp.turn;
-    ClearSelection();
+    Player& player = ActivePlayer();
+    player.x = x;
+    player.y = y;
+    player.z = z;
+    if (spendTurn) {
+        EndTurn();
+    } else {
+        ClearSelection();
+    }
     return true;
 }
 
 void MovePlayer(int dx, int dy, const std::wstring& facing) {
-    gApp.playerFacing = facing;
-    const int nextX = gApp.playerX + dx;
-    const int nextY = gApp.playerY + dy;
-    const int nextZ = gApp.playerZ;
+    Player& player = ActivePlayer();
+    player.facing = facing;
+    const int nextX = player.x + dx;
+    const int nextY = player.y + dy;
+    const int nextZ = player.z;
     EnterOrDig(nextX, nextY, nextZ, true);
     CenterCameraOnPlayer();
     InvalidateRect(gApp.hwnd, nullptr, FALSE);
@@ -1002,9 +1038,8 @@ void MovePlayer(int dx, int dy, const std::wstring& facing) {
 bool TryExecuteClickedOption(int screenX, int screenY) {
     for (const MoveOption& option : gApp.moveOptions) {
         if (PointInCellDiamond(screenX, screenY, option.x, option.y, option.z)) {
-            gApp.playerFacing = option.facing;
+            ActivePlayer().facing = option.facing;
             EnterOrDig(option.x, option.y, option.z, true);
-            CenterCameraOnPlayer();
             InvalidateRect(gApp.hwnd, nullptr, FALSE);
             return true;
         }
@@ -1051,7 +1086,7 @@ void RotateViewDown() {
 void HandleLeftClick(int screenX, int screenY) {
     if (gApp.playerSelected && TryExecuteClickedOption(screenX, screenY)) return;
 
-    if (PointInRect(ActorBounds(), screenX, screenY)) {
+    if (PointInRect(ActorBounds(gApp.activePlayer), screenX, screenY)) {
         SelectPlayer();
         return;
     }
@@ -1067,9 +1102,11 @@ void RandomizeSeed() {
     gApp.seedText = buffer;
     gApp.seedHash = HashString(gApp.seedText);
     gApp.removedBlocks.clear();
-    gApp.playerX = kWorldSize / 2;
-    gApp.playerY = kWorldSize / 2;
-    gApp.playerZ = TopSurfaceZ(gApp.playerX, gApp.playerY) + 1;
+    gApp.players[0] = {kWorldSize / 2 - 2, kWorldSize / 2, 0, L"S", L"sphere-blue"};
+    gApp.players[0].z = TopSurfaceZ(gApp.players[0].x, gApp.players[0].y) + 1;
+    gApp.players[1] = {kWorldSize / 2 + 2, kWorldSize / 2, 0, L"S", L"sphere-red"};
+    gApp.players[1].z = TopSurfaceZ(gApp.players[1].x, gApp.players[1].y) + 1;
+    gApp.activePlayer = 0;
     gApp.turn = 0;
     ClearSelection();
     CenterCameraOnPlayer();
@@ -1082,9 +1119,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
             gApp.hwnd = hwnd;
             gApp.seedHash = HashString(gApp.seedText);
             LoadImages();
-            gApp.playerX = kWorldSize / 2;
-            gApp.playerY = kWorldSize / 2;
-            gApp.playerZ = TopSurfaceZ(gApp.playerX, gApp.playerY) + 1;
+            gApp.players[0] = {kWorldSize / 2 - 2, kWorldSize / 2, 0, L"S", L"sphere-blue"};
+            gApp.players[0].z = TopSurfaceZ(gApp.players[0].x, gApp.players[0].y) + 1;
+            gApp.players[1] = {kWorldSize / 2 + 2, kWorldSize / 2, 0, L"S", L"sphere-red"};
+            gApp.players[1].z = TopSurfaceZ(gApp.players[1].x, gApp.players[1].y) + 1;
+            gApp.activePlayer = 0;
             CenterCameraOnPlayer();
             return 0;
 
