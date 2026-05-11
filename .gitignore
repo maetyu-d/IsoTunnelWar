@@ -1,0 +1,9 @@
+build/
+*.obj
+*.ilk
+*.pdb
+*.exe
+*.zip
+*.rar
+*.7z
+.tile-source/
