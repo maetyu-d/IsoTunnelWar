@@ -123,6 +123,7 @@ struct AppState {
     std::vector<MoveOption> moveOptions;
     std::unordered_map<std::wstring, std::unique_ptr<Bitmap>> images;
     std::unordered_set<std::wstring> removedBlocks;
+    std::unordered_map<std::wstring, int> tunnelOwners;
 };
 
 AppState gApp;
@@ -339,6 +340,11 @@ bool DugCellAt(int x, int y, int z) {
            gApp.removedBlocks.find(BlockKey(x, y, z)) != gApp.removedBlocks.end();
 }
 
+int TunnelOwnerAt(int x, int y, int z) {
+    const auto it = gApp.tunnelOwners.find(BlockKey(x, y, z));
+    return it == gApp.tunnelOwners.end() ? -1 : it->second;
+}
+
 bool ExposedBlockAt(int x, int y, int z) {
     if (!SolidBlockAt(x, y, z)) return false;
 
@@ -368,7 +374,9 @@ bool HasAnyBlockInColumn(int x, int y) {
 
 void RemoveBlockAt(int x, int y, int z) {
     if (InWorldCube(x, y, z)) {
-        gApp.removedBlocks.insert(BlockKey(x, y, z));
+        const std::wstring key = BlockKey(x, y, z);
+        gApp.removedBlocks.insert(key);
+        gApp.tunnelOwners[key] = gApp.activePlayer;
     }
 }
 
@@ -667,13 +675,38 @@ void DrawOptionHighlight(Graphics& graphics, const MoveOption& option) {
     graphics.DrawPolygon(&pen, points, 4);
 }
 
+Color TunnelFillColor(int owner, bool occupied) {
+    if (owner == 0) return occupied ? Color(235, 18, 44, 94) : Color(205, 8, 22, 72);
+    if (owner == 1) return occupied ? Color(235, 82, 20, 28) : Color(205, 62, 9, 18);
+    return occupied ? Color(230, 24, 42, 72) : Color(205, 8, 18, 34);
+}
+
+Color TunnelEdgeColor(int owner, bool occupied) {
+    if (owner == 0) return occupied ? Color(255, 170, 230, 255) : Color(245, 80, 165, 255);
+    if (owner == 1) return occupied ? Color(255, 255, 180, 180) : Color(245, 255, 105, 105);
+    return occupied ? Color(255, 240, 210, 90) : Color(245, 115, 210, 255);
+}
+
+Color TunnelInnerColor(int owner, bool occupied) {
+    if (owner == 0) return occupied ? Color(255, 220, 245, 255) : Color(230, 135, 210, 255);
+    if (owner == 1) return occupied ? Color(255, 255, 220, 220) : Color(230, 255, 150, 150);
+    return occupied ? Color(255, 255, 245, 150) : Color(230, 150, 235, 255);
+}
+
+Color TunnelGlowColor(int owner) {
+    if (owner == 0) return Color(95, 20, 70, 140);
+    if (owner == 1) return Color(95, 90, 18, 26);
+    return Color(95, 25, 70, 130);
+}
+
 void DrawTunnelCell(Graphics& graphics, int x, int y, int z, bool occupied) {
     PointF points[4] = {PointF(), PointF(), PointF(), PointF()};
     CellDiamondPoints(x, y, z, points);
 
-    const Color fill = occupied ? Color(230, 24, 42, 72) : Color(205, 8, 18, 34);
-    const Color edge = occupied ? Color(255, 240, 210, 90) : Color(245, 115, 210, 255);
-    const Color inner = occupied ? Color(255, 255, 245, 150) : Color(230, 150, 235, 255);
+    const int owner = TunnelOwnerAt(x, y, z);
+    const Color fill = TunnelFillColor(owner, occupied);
+    const Color edge = TunnelEdgeColor(owner, occupied);
+    const Color inner = TunnelInnerColor(owner, occupied);
     SolidBrush brush(fill);
     Pen pen(edge, occupied ? 3.6f : 2.4f);
     Pen innerPen(inner, occupied ? 2.0f : 1.2f);
@@ -700,7 +733,7 @@ void DrawTunnelCell(Graphics& graphics, int x, int y, int z, bool occupied) {
         PointF(innerDiamond[2].X, innerDiamond[2].Y + drop),
         PointF(innerDiamond[3].X, innerDiamond[3].Y + drop),
     };
-    Pen shaftPen(occupied ? Color(220, 255, 220, 115) : Color(170, 100, 205, 225), 1.5f);
+    Pen shaftPen(occupied ? TunnelInnerColor(owner, true) : TunnelEdgeColor(owner, false), 1.5f);
     graphics.DrawLine(&shaftPen, innerDiamond[1], lower[1]);
     graphics.DrawLine(&shaftPen, innerDiamond[2], lower[2]);
     graphics.DrawLine(&shaftPen, innerDiamond[3], lower[3]);
@@ -713,9 +746,9 @@ void DrawTunnelCell(Graphics& graphics, int x, int y, int z, bool occupied) {
     } directions[] = {
         {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1},
     };
-    Pen linkPen(occupied ? Color(245, 255, 220, 120) : Color(205, 130, 235, 255), occupied ? 3.0f : 2.0f);
-    Pen glowPen(Color(95, 25, 70, 130), occupied ? 6.0f : 4.0f);
+    Pen glowPen(TunnelGlowColor(owner), occupied ? 6.0f : 4.0f);
     for (const Direction& direction : directions) {
+        const int neighborOwner = TunnelOwnerAt(x + direction.dx, y + direction.dy, z + direction.dz);
         const bool playerInNeighbor =
             InWorldCube(ActivePlayerConst().x, ActivePlayerConst().y, ActivePlayerConst().z) &&
             !SolidBlockAt(ActivePlayerConst().x, ActivePlayerConst().y, ActivePlayerConst().z) &&
@@ -730,6 +763,12 @@ void DrawTunnelCell(Graphics& graphics, int x, int y, int z, bool occupied) {
                      center.Y + (neighbor.Y - center.Y) * 0.22f);
         PointF end(center.X + (neighbor.X - center.X) * 0.50f,
                    center.Y + (neighbor.Y - center.Y) * 0.50f);
+        const bool mixedOwners = neighborOwner >= 0 && owner >= 0 && neighborOwner != owner;
+        Pen linkPen(mixedOwners ? Color(245, 245, 225, 90) : TunnelEdgeColor(owner, occupied),
+                    occupied ? 3.0f : 2.0f);
+        if (mixedOwners) {
+            linkPen.SetDashStyle(Gdiplus::DashStyleDash);
+        }
         graphics.DrawLine(&glowPen, start, end);
         graphics.DrawLine(&linkPen, start, end);
     }
@@ -1102,6 +1141,7 @@ void RandomizeSeed() {
     gApp.seedText = buffer;
     gApp.seedHash = HashString(gApp.seedText);
     gApp.removedBlocks.clear();
+    gApp.tunnelOwners.clear();
     gApp.players[0] = {kWorldSize / 2 - 2, kWorldSize / 2, 0, L"S", L"sphere-blue"};
     gApp.players[0].z = TopSurfaceZ(gApp.players[0].x, gApp.players[0].y) + 1;
     gApp.players[1] = {kWorldSize / 2 + 2, kWorldSize / 2, 0, L"S", L"sphere-red"};
