@@ -116,6 +116,7 @@ struct AppState {
     double dragCameraY = 0.0;
     int turn = 0;
     int activePlayer = 0;
+    int actionsThisPlayer = 0;
     Player players[2];
     int view[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
     int viewTurns = 0;
@@ -830,9 +831,10 @@ void DrawHud(Graphics& graphics, int visibleCount) {
 
     wchar_t stats[256] = {};
     const Player& player = ActivePlayerConst();
-    swprintf_s(stats, L"cube: %dx%dx%d    turn: %d    active: P%d    player: %d,%d,%d    90deg turns:%d    dug: %zu    visible: %d    zoom: %.2fx",
+    swprintf_s(stats, L"cube: %dx%dx%d    turn: %d    active: P%d action:%d/2    player: %d,%d,%d    90deg turns:%d    dug: %zu    visible: %d    zoom: %.2fx",
                kWorldSize, kWorldSize, kWorldSize,
-               gApp.turn, gApp.activePlayer + 1, player.x, player.y, player.z, PositiveMod(gApp.viewTurns, 24),
+               gApp.turn, gApp.activePlayer + 1, gApp.actionsThisPlayer + 1, player.x, player.y, player.z,
+               PositiveMod(gApp.viewTurns, 24),
                gApp.removedBlocks.size(), visibleCount, gApp.zoom);
     graphics.DrawString(stats, -1, &hudFont, PointF(300, 46), &muted);
 
@@ -1039,7 +1041,11 @@ void ClearSelection() {
 
 void EndTurn() {
     ++gApp.turn;
-    gApp.activePlayer = 1 - gApp.activePlayer;
+    ++gApp.actionsThisPlayer;
+    if (gApp.actionsThisPlayer >= 2) {
+        gApp.actionsThisPlayer = 0;
+        gApp.activePlayer = 1 - gApp.activePlayer;
+    }
     ClearSelection();
     CenterCameraOnPlayer();
 }
@@ -1147,6 +1153,7 @@ void RandomizeSeed() {
     gApp.players[1] = {kWorldSize / 2 + 2, kWorldSize / 2, 0, L"S", L"sphere-red"};
     gApp.players[1].z = TopSurfaceZ(gApp.players[1].x, gApp.players[1].y) + 1;
     gApp.activePlayer = 0;
+    gApp.actionsThisPlayer = 0;
     gApp.turn = 0;
     ClearSelection();
     CenterCameraOnPlayer();
@@ -1164,6 +1171,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
             gApp.players[1] = {kWorldSize / 2 + 2, kWorldSize / 2, 0, L"S", L"sphere-red"};
             gApp.players[1].z = TopSurfaceZ(gApp.players[1].x, gApp.players[1].y) + 1;
             gApp.activePlayer = 0;
+            gApp.actionsThisPlayer = 0;
             CenterCameraOnPlayer();
             return 0;
 
