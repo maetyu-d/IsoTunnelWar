@@ -866,17 +866,6 @@ void DrawPlayerSphere(Graphics& graphics, int playerIndex, int sphereIndex) {
     }
 }
 
-void DrawIsoGrid(Graphics& graphics, int minX, int maxX, int minY, int maxY) {
-    Pen gridPen(Color(165, 42, 174, 198), 1.0f);
-    for (int x = minX; x <= maxX; ++x) {
-        for (int y = minY; y <= maxY; ++y) {
-            PointF points[4] = {PointF(), PointF(), PointF(), PointF()};
-            CellDiamondPoints(x, y, 0, points);
-            graphics.DrawPolygon(&gridPen, points, 4);
-        }
-    }
-}
-
 void DrawHud(Graphics& graphics, int visibleCount) {
     SolidBrush panel(Color(210, 12, 18, 16));
     SolidBrush text(Color(245, 240, 223));
@@ -918,8 +907,6 @@ void DrawScene(HDC hdc) {
     const int maxX = kWorldSize - 1;
     const int minY = 0;
     const int maxY = kWorldSize - 1;
-
-    DrawIsoGrid(graphics, minX, maxX, minY, maxY);
 
     std::vector<RenderTile> renderTiles;
     for (int x = minX; x <= maxX; ++x) {
