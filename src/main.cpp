@@ -23,6 +23,7 @@ using Gdiplus::Font;
 using Gdiplus::FontFamily;
 using Gdiplus::Graphics;
 using Gdiplus::Image;
+using Gdiplus::LinearGradientBrush;
 using Gdiplus::Pen;
 using Gdiplus::PointF;
 using Gdiplus::Rect;
@@ -896,12 +897,86 @@ void DrawHud(Graphics& graphics, int visibleCount) {
                         -1, &hudFont, PointF(34, static_cast<float>(gApp.height - 50)), &muted);
 }
 
+void DrawHellscapeBackground(Graphics& graphics) {
+    const float width = static_cast<float>(gApp.width);
+    const float height = static_cast<float>(gApp.height);
+    const RectF skyRect(0, 0, width, height);
+    LinearGradientBrush sky(skyRect, Color(255, 5, 8, 16), Color(255, 85, 18, 10),
+                            Gdiplus::LinearGradientModeVertical);
+    graphics.FillRectangle(&sky, skyRect);
+
+    const float horizon = height * 0.62f;
+    LinearGradientBrush burn(RectF(0, horizon - height * 0.22f, width, height * 0.48f),
+                             Color(10, 255, 205, 76), Color(185, 190, 38, 9),
+                             Gdiplus::LinearGradientModeVertical);
+    graphics.FillRectangle(&burn, RectF(0, horizon - height * 0.22f, width, height * 0.48f));
+
+    SolidBrush ashVeil(Color(80, 7, 12, 18));
+    for (int i = 0; i < 18; ++i) {
+        const float x = static_cast<float>(Hash2(i * 17, 4, 4100) * width);
+        const float y = static_cast<float>(Hash2(i * 29, 7, 4101) * height * 0.54);
+        const float w = static_cast<float>(120.0 + Hash2(i, 11, 4102) * 260.0);
+        const float h = static_cast<float>(16.0 + Hash2(i, 13, 4103) * 42.0);
+        graphics.FillEllipse(&ashVeil, RectF(x - w * 0.5f, y, w, h));
+    }
+
+    SolidBrush farGlow(Color(160, 255, 86, 18));
+    for (int i = 0; i < 9; ++i) {
+        const float x = static_cast<float>((i + 0.35 + Hash2(i, 20, 4200) * 0.45) * width / 9.0);
+        const float y = horizon + static_cast<float>(Hash2(i, 21, 4201) * height * 0.12);
+        const float r = static_cast<float>(28.0 + Hash2(i, 22, 4202) * 65.0);
+        graphics.FillEllipse(&farGlow, RectF(x - r, y - r * 0.35f, r * 2.0f, r * 0.7f));
+    }
+
+    SolidBrush ruinFar(Color(220, 10, 13, 18));
+    SolidBrush ruinNear(Color(245, 3, 5, 9));
+    for (int layer = 0; layer < 2; ++layer) {
+        const float baseY = horizon + layer * height * 0.08f;
+        const float step = layer == 0 ? 42.0f : 58.0f;
+        for (int i = -2; i < static_cast<int>(width / step) + 3; ++i) {
+            const float x = i * step + static_cast<float>(Hash2(i, layer, 4300) * 18.0);
+            const float towerW = static_cast<float>(18.0 + Hash2(i, layer, 4301) * 34.0);
+            const float towerH = static_cast<float>(55.0 + Hash2(i, layer, 4302) * (layer == 0 ? 150.0 : 240.0));
+            SolidBrush& brush = layer == 0 ? ruinFar : ruinNear;
+            graphics.FillRectangle(&brush, RectF(x, baseY - towerH, towerW, towerH));
+            if (Hash2(i, layer, 4303) > 0.48) {
+                PointF cap[3] = {
+                    PointF(x - towerW * 0.15f, baseY - towerH),
+                    PointF(x + towerW * 0.55f, baseY - towerH - towerW * 0.75f),
+                    PointF(x + towerW * 1.15f, baseY - towerH),
+                };
+                graphics.FillPolygon(&brush, cap, 3);
+            }
+        }
+    }
+
+    Pen lavaPen(Color(210, 255, 96, 24), 2.0f);
+    Pen hotPen(Color(180, 255, 185, 65), 1.0f);
+    for (int i = 0; i < 14; ++i) {
+        const float y = horizon + static_cast<float>(Hash2(i, 0, 4400) * height * 0.32);
+        const float x0 = static_cast<float>(Hash2(i, 1, 4401) * width);
+        const float length = static_cast<float>(80.0 + Hash2(i, 2, 4402) * 260.0);
+        graphics.DrawLine(&lavaPen, PointF(x0, y), PointF(std::min(width, x0 + length), y + 8.0f));
+        graphics.DrawLine(&hotPen, PointF(x0 + 12.0f, y - 1.0f),
+                          PointF(std::min(width, x0 + length * 0.72f), y + 4.0f));
+    }
+
+    for (int i = 0; i < 34; ++i) {
+        const float x = static_cast<float>(Hash2(i, 2, 4500) * width);
+        const float y = static_cast<float>(Hash2(i, 3, 4501) * height * 0.86);
+        const float size = static_cast<float>(1.5 + Hash2(i, 4, 4502) * 4.0);
+        SolidBrush ember(Hash2(i, 5, 4503) > 0.38 ? Color(210, 255, 154, 50)
+                                                   : Color(170, 255, 60, 28));
+        graphics.FillEllipse(&ember, RectF(x, y, size, size));
+    }
+}
+
 void DrawScene(HDC hdc) {
     Bitmap backBuffer(gApp.width, gApp.height, PixelFormat32bppPARGB);
     Graphics graphics(&backBuffer);
     graphics.SetInterpolationMode(Gdiplus::InterpolationModeNearestNeighbor);
     graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
-    graphics.Clear(Color(255, 4, 11, 15));
+    DrawHellscapeBackground(graphics);
 
     const int minX = 0;
     const int maxX = kWorldSize - 1;
