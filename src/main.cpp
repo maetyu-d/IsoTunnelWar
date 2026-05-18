@@ -41,6 +41,8 @@ constexpr int kHalfH = kFootprintH / 2;
 constexpr int kWorldSize = 24;
 constexpr int kPlayers = 2;
 constexpr int kSpheresPerPlayer = 3;
+constexpr int kUrbanCell = 6;
+constexpr int kUrbanFloor = 5;
 constexpr double kActorScale = 1.0;
 
 const wchar_t* kClassName = L"InfiniteIsoMiddleEarthWindow";
@@ -337,6 +339,40 @@ int SouthSurfaceY(int x, int z) {
     return kWorldSize - 1 - ReliefDepthForFace(x, z, 2600);
 }
 
+bool UrbanVoidAt(int x, int y, int z) {
+    if (!InWorldCube(x, y, z)) return false;
+    if (x < 3 || x > kWorldSize - 4 || y < 3 || y > kWorldSize - 4 || z < 3 ||
+        z > kWorldSize - 5) {
+        return false;
+    }
+
+    const int lx = PositiveMod(x, kUrbanCell);
+    const int ly = PositiveMod(y, kUrbanCell);
+    const int lz = PositiveMod(z, kUrbanFloor);
+    const bool floorBand = lz == 1 || lz == 2;
+    const bool upperBand = lz == 2 || lz == 3;
+
+    const bool northSouthStreet = floorBand && (lx == 2 || lx == 3) && ly >= 1 && ly <= 4;
+    const bool eastWestStreet = floorBand && (ly == 2 || ly == 3) && lx >= 1 && lx <= 4;
+    const bool room = floorBand && lx >= 4 && lx <= 5 && ly >= 4 && ly <= 5 &&
+                      Hash2(x / kUrbanCell, y / kUrbanCell + z / kUrbanFloor * 9, 3300) > 0.28;
+    const bool marketPocket = upperBand && lx >= 1 && lx <= 2 && ly >= 4 && ly <= 5 &&
+                              Hash2(x / kUrbanCell, y / kUrbanCell + z / kUrbanFloor * 11, 3400) > 0.68;
+    const bool liftShaft = (lx == 1 && ly == 1) || (lx == 4 && ly == 1 && z > 6 && z < 18);
+    const bool breach = (x == kWorldSize / 2 || x == kWorldSize / 2 - 1) &&
+                        (y == kWorldSize / 2 || y == kWorldSize / 2 - 1) && z >= 7 && z <= 17;
+
+    return northSouthStreet || eastWestStreet || room || marketPocket || liftShaft || breach;
+}
+
+bool UrbanSolidWallAt(int x, int y, int z) {
+    if (!InWorldCube(x, y, z) || UrbanVoidAt(x, y, z)) return false;
+    const int lx = PositiveMod(x, kUrbanCell);
+    const int ly = PositiveMod(y, kUrbanCell);
+    const int lz = PositiveMod(z, kUrbanFloor);
+    return lx == 0 || ly == 0 || lz == 0 || (lx == 5 && ly <= 3) || (ly == 5 && lx <= 3);
+}
+
 bool NaturalSolidBlockAt(int x, int y, int z) {
     if (!InWorldCube(x, y, z)) return false;
     if (z > TopSurfaceZ(x, y)) return false;
@@ -345,6 +381,7 @@ bool NaturalSolidBlockAt(int x, int y, int z) {
     if (x > EastSurfaceX(y, z)) return false;
     if (y < NorthSurfaceY(x, z)) return false;
     if (y > SouthSurfaceY(x, z)) return false;
+    if (UrbanVoidAt(x, y, z)) return false;
     return true;
 }
 
@@ -492,6 +529,14 @@ Tile LandscapeTileForFace(int u, int v, int altitude, bool vertical, uint32_t sa
 }
 
 Tile SurfaceTileFor(int x, int y, int z) {
+    if (UrbanSolidWallAt(x, y, z)) {
+        const double roll = Hash2(x + z * 5, y - z * 7, 3700);
+        const int lz = PositiveMod(z, kUrbanFloor);
+        if (lz == 0 && roll > 0.58) return {L"Wood"};
+        if (roll > 0.76) return {L"Cutstone_Broken"};
+        if (roll > 0.46) return {L"Cutsone_Moss"};
+        return {L"Cutstone"};
+    }
     if (!SolidBlockAt(x, y, z + 1)) return LandscapeTileForFace(x, y, z, false, 900);
     if (!SolidBlockAt(x - 1, y, z)) return LandscapeTileForFace(y, z, z, true, 1020);
     if (!SolidBlockAt(x + 1, y, z)) return LandscapeTileForFace(y, z, z, true, 1140);
@@ -1175,6 +1220,21 @@ void HandleLeftClick(int screenX, int screenY) {
     InvalidateRect(gApp.hwnd, nullptr, FALSE);
 }
 
+Player MakeSphere(int side, int index, int x, int y, int z) {
+    for (int radius = 0; radius < 5; ++radius) {
+        for (int dx = -radius; dx <= radius; ++dx) {
+            for (int dy = -radius; dy <= radius; ++dy) {
+                const int sx = x + dx;
+                const int sy = y + dy;
+                if (!IsPlayableCell(sx, sy, z) || SolidBlockAt(sx, sy, z)) continue;
+                return {sx, sy, z, true, L"S", side == 0 ? L"sphere-blue" : L"sphere-red"};
+            }
+        }
+    }
+    (void)index;
+    return {x, y, z, true, L"S", side == 0 ? L"sphere-blue" : L"sphere-red"};
+}
+
 void RandomizeSeed() {
     std::mt19937 rng(static_cast<uint32_t>(GetTickCount64()));
     wchar_t buffer[32] = {};
@@ -1185,10 +1245,8 @@ void RandomizeSeed() {
     gApp.tunnelOwners.clear();
     for (int i = 0; i < kSpheresPerPlayer; ++i) {
         const int offsetY = i - 1;
-        gApp.players[0][i] = {kWorldSize / 2 - 4, kWorldSize / 2 + offsetY * 2, 0, true, L"S", L"sphere-blue"};
-        gApp.players[0][i].z = TopSurfaceZ(gApp.players[0][i].x, gApp.players[0][i].y) + 1;
-        gApp.players[1][i] = {kWorldSize / 2 + 4, kWorldSize / 2 + offsetY * 2, 0, true, L"S", L"sphere-red"};
-        gApp.players[1][i].z = TopSurfaceZ(gApp.players[1][i].x, gApp.players[1][i].y) + 1;
+        gApp.players[0][i] = MakeSphere(0, i, 5, kWorldSize / 2 + offsetY * 2, 12);
+        gApp.players[1][i] = MakeSphere(1, i, kWorldSize - 6, kWorldSize / 2 + offsetY * 2, 12);
     }
     gApp.activePlayer = 0;
     gApp.activeSphere = 0;
@@ -1207,10 +1265,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
             LoadImages();
             for (int i = 0; i < kSpheresPerPlayer; ++i) {
                 const int offsetY = i - 1;
-                gApp.players[0][i] = {kWorldSize / 2 - 4, kWorldSize / 2 + offsetY * 2, 0, true, L"S", L"sphere-blue"};
-                gApp.players[0][i].z = TopSurfaceZ(gApp.players[0][i].x, gApp.players[0][i].y) + 1;
-                gApp.players[1][i] = {kWorldSize / 2 + 4, kWorldSize / 2 + offsetY * 2, 0, true, L"S", L"sphere-red"};
-                gApp.players[1][i].z = TopSurfaceZ(gApp.players[1][i].x, gApp.players[1][i].y) + 1;
+                gApp.players[0][i] = MakeSphere(0, i, 5, kWorldSize / 2 + offsetY * 2, 12);
+                gApp.players[1][i] = MakeSphere(1, i, kWorldSize - 6, kWorldSize / 2 + offsetY * 2, 12);
             }
             gApp.activePlayer = 0;
             gApp.activeSphere = 0;
