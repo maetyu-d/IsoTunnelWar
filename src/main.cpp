@@ -100,6 +100,7 @@ enum class OptionKind {
 enum class EffectKind {
     ArcLance,
     BreachCharge,
+    DroneDeath,
     Impact,
 };
 
@@ -179,6 +180,7 @@ struct AppState {
     bool controllerSelected = false;
     std::vector<MoveOption> moveOptions;
     std::vector<WeaponEffect> weaponEffects;
+    std::unordered_set<std::wstring> scorchMarks;
     std::vector<CombatLogEntry> combatLog;
     std::wstring actionNotice;
     uint64_t actionNoticeTime = 0;
@@ -491,6 +493,16 @@ bool SolidBlockAt(int x, int y, int z) {
 bool DugCellAt(int x, int y, int z) {
     return InWorldCube(x, y, z) &&
            gApp.removedBlocks.find(BlockKey(x, y, z)) != gApp.removedBlocks.end();
+}
+
+bool ScorchAt(int x, int y, int z) {
+    return gApp.scorchMarks.find(BlockKey(x, y, z)) != gApp.scorchMarks.end();
+}
+
+void AddScorchAt(int x, int y, int z) {
+    if (InWorldCube(x, y, z)) {
+        gApp.scorchMarks.insert(BlockKey(x, y, z));
+    }
 }
 
 int TunnelOwnerAt(int x, int y, int z) {
@@ -1117,6 +1129,33 @@ void DrawTopSurfaceFidelity(Graphics& graphics, int x, int y, int z) {
     }
 }
 
+void DrawScorchMark(Graphics& graphics, int x, int y, int z) {
+    if (!ScorchAt(x, y, z)) return;
+
+    const PointF center = WorldToScreen3(x, y, z);
+    const float rx = static_cast<float>((kHalfW * (0.46 + Hash2(x, y, 8800) * 0.18)) * gApp.zoom);
+    const float ry = static_cast<float>((ViewHalfH() * (0.36 + Hash2(x, z, 8801) * 0.16)) * gApp.zoom);
+    const float skew = static_cast<float>((Hash2(x + z, y, 8802) - 0.5) * 4.0 * gApp.zoom);
+    PointF burn[8] = {
+        PointF(center.X, center.Y - ry),
+        PointF(center.X + rx * 0.45f, center.Y - ry * 0.55f + skew),
+        PointF(center.X + rx, center.Y),
+        PointF(center.X + rx * 0.42f, center.Y + ry * 0.50f),
+        PointF(center.X, center.Y + ry),
+        PointF(center.X - rx * 0.50f, center.Y + ry * 0.45f - skew),
+        PointF(center.X - rx, center.Y),
+        PointF(center.X - rx * 0.44f, center.Y - ry * 0.48f),
+    };
+
+    SolidBrush charred(Color(150, 5, 4, 5));
+    SolidBrush ember(Color(62, 255, 92, 28));
+    Pen ashEdge(Color(125, 0, 0, 0), 1.0f);
+    graphics.FillPolygon(&charred, burn, 8);
+    graphics.DrawPolygon(&ashEdge, burn, 8);
+    graphics.FillEllipse(&ember, RectF(center.X - rx * 0.28f, center.Y - ry * 0.20f,
+                                       rx * 0.56f, ry * 0.38f));
+}
+
 void DrawBlockAtmosphere(Graphics& graphics, int x, int y, int z) {
     PointF points[4] = {PointF(), PointF(), PointF(), PointF()};
     CellDiamondPoints(x, y, z, points);
@@ -1140,6 +1179,25 @@ void DrawBlockAtmosphere(Graphics& graphics, int x, int y, int z) {
 void AddWeaponEffect(EffectKind kind, int x1, int y1, int z1, int x2, int y2, int z2,
                      uint64_t duration = 420) {
     gApp.weaponEffects.push_back({kind, x1, y1, z1, x2, y2, z2, GetTickCount64(), duration});
+}
+
+void ScorchDroneDeathArea(int x, int y, int z) {
+    AddScorchAt(x, y, z);
+    const struct Direction {
+        int dx;
+        int dy;
+        int dz;
+    } directions[] = {
+        {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1},
+    };
+    for (const Direction& direction : directions) {
+        const int sx = x + direction.dx;
+        const int sy = y + direction.dy;
+        const int sz = z + direction.dz;
+        if (InWorldCube(sx, sy, sz) && Hash2(sx, sy + sz, 8900) > 0.28) {
+            AddScorchAt(sx, sy, sz);
+        }
+    }
 }
 
 void DrawWeaponEffects(Graphics& graphics) {
@@ -1173,16 +1231,40 @@ void DrawWeaponEffects(Graphics& graphics) {
                       static_cast<float>((5.0 * fade + 1.5) * gApp.zoom));
             shock.SetDashStyle(Gdiplus::DashStyleDash);
             graphics.DrawLine(&shock, start, end);
+        } else if (effect.kind == EffectKind::DroneDeath) {
+            const float flare = static_cast<float>((1.0 - age * 0.35) * gApp.zoom);
+            SolidBrush flash(Color(static_cast<BYTE>(210 * fade), 255, 205, 95));
+            SolidBrush smoke(Color(static_cast<BYTE>(110 * fade), 12, 10, 12));
+            Pen sparks(Color(static_cast<BYTE>(210 * fade), 255, 155, 55),
+                       static_cast<float>((1.0 + fade * 1.4) * gApp.zoom));
+            graphics.FillEllipse(&smoke, RectF(end.X - 22.0f * flare, end.Y - 16.0f * flare,
+                                              44.0f * flare, 32.0f * flare));
+            graphics.FillEllipse(&flash, RectF(end.X - 10.0f * flare, end.Y - 10.0f * flare,
+                                              20.0f * flare, 20.0f * flare));
+            for (int i = 0; i < 7; ++i) {
+                const double angle = (i / 7.0) * 6.28318530718 + Hash2(effect.x2 + i, effect.y2, 9100);
+                const float len = static_cast<float>((12.0 + Hash2(i, effect.z2, 9101) * 16.0) * fade *
+                                                     gApp.zoom);
+                graphics.DrawLine(&sparks, end,
+                                  PointF(end.X + static_cast<float>(std::cos(angle) * len),
+                                         end.Y + static_cast<float>(std::sin(angle) * len * 0.62)));
+            }
         }
 
-        const float radius = static_cast<float>((effect.kind == EffectKind::ArcLance ? 14.0 : 18.0) *
+        const float radius = static_cast<float>((effect.kind == EffectKind::ArcLance ? 14.0
+                                                : effect.kind == EffectKind::DroneDeath ? 20.0
+                                                                                       : 18.0) *
                                                 (0.45 + age) * gApp.zoom);
         SolidBrush glow(effect.kind == EffectKind::ArcLance
                             ? Color(static_cast<BYTE>(165 * fade), 220, 35, 255)
-                            : Color(static_cast<BYTE>(140 * fade), 255, 168, 52));
+                            : effect.kind == EffectKind::DroneDeath
+                                  ? Color(static_cast<BYTE>(120 * fade), 255, 92, 30)
+                                  : Color(static_cast<BYTE>(140 * fade), 255, 168, 52));
         Pen ring(effect.kind == EffectKind::ArcLance
                      ? Color(static_cast<BYTE>(245 * fade), 255, 245, 255)
-                     : Color(static_cast<BYTE>(230 * fade), 255, 226, 125),
+                     : effect.kind == EffectKind::DroneDeath
+                           ? Color(static_cast<BYTE>(220 * fade), 255, 190, 80)
+                           : Color(static_cast<BYTE>(230 * fade), 255, 226, 125),
                  static_cast<float>((2.0 + 2.0 * fade) * gApp.zoom));
         graphics.FillEllipse(&glow, RectF(end.X - radius, end.Y - radius,
                                           radius * 2.0f, radius * 2.0f));
@@ -1591,6 +1673,7 @@ void DrawScene(HDC hdc) {
                 Pen topPen(Color(135, 255, 170, 92), 1.0f);
                 graphics.DrawPolygon(&topPen, points, 4);
                 DrawTopSurfaceFidelity(graphics, renderTile.x, renderTile.y, renderTile.z);
+                DrawScorchMark(graphics, renderTile.x, renderTile.y, renderTile.z);
                 DrawBlockAtmosphere(graphics, renderTile.x, renderTile.y, renderTile.z);
             }
         }
@@ -1621,6 +1704,7 @@ void DrawScene(HDC hdc) {
     for (const RenderTile& cell : tunnelCells) {
         DrawTunnelCell(graphics, cell.x, cell.y, cell.z,
                        cell.x == active.x && cell.y == active.y && cell.z == active.z);
+        DrawScorchMark(graphics, cell.x, cell.y, cell.z);
     }
     for (int playerIndex = 0; playerIndex < kPlayers; ++playerIndex) {
         DrawControllerCore(graphics, playerIndex);
@@ -1873,6 +1957,8 @@ bool DamageEnemyAt(int x, int y, int z) {
     int sphereIndex = -1;
     if (OccupyingSphereAt(x, y, z, &sphereOwner, &sphereIndex) && sphereOwner != gApp.activePlayer) {
         gApp.players[sphereOwner][sphereIndex].alive = false;
+        AddWeaponEffect(EffectKind::DroneDeath, x, y, z, x, y, z, 620);
+        ScorchDroneDeathArea(x, y, z);
         wchar_t message[128] = {};
         swprintf_s(message, L"%s destroyed %s drone %d",
                    PlayerLabel(gApp.activePlayer).c_str(), PlayerLabel(sphereOwner).c_str(),
@@ -2201,6 +2287,7 @@ void ResetMatchPieces() {
     gApp.actionNotice.clear();
     gApp.combatLog.clear();
     gApp.weaponEffects.clear();
+    gApp.scorchMarks.clear();
     ClearSelection();
 }
 
