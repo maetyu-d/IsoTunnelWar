@@ -1123,39 +1123,10 @@ void CenterCameraOnPlayer() {
 }
 
 void CenterCameraOnCube() {
-    double minX = 0.0;
-    double maxX = 0.0;
-    double minY = 0.0;
-    double maxY = 0.0;
-    bool first = true;
-
-    for (int x : {0, kWorldSize - 1}) {
-        for (int y : {0, kWorldSize - 1}) {
-            for (int z : {0, kWorldSize - 1}) {
-                const Vec3 view = ViewTransform(x, y, z);
-                const double px = (view.x - view.y) * kHalfW * gApp.zoom;
-                const double py = ((view.x + view.y) * ViewHalfH() - view.z * ViewLayerH()) *
-                                  gApp.zoom;
-                if (first) {
-                    minX = maxX = px;
-                    minY = maxY = py;
-                    first = false;
-                } else {
-                    minX = std::min(minX, px);
-                    maxX = std::max(maxX, px);
-                    minY = std::min(minY, py);
-                    maxY = std::max(maxY, py);
-                }
-            }
-        }
-    }
-
-    const double cubeCenterX = (minX + maxX) * 0.5;
-    const double cubeCenterY = (minY + maxY) * 0.5;
-    const double targetX = gApp.width * 0.50;
-    const double targetY = gApp.height * 0.58;
-    gApp.cameraX = gApp.width * 0.5 + cubeCenterX - targetX;
-    gApp.cameraY = gApp.height * 0.5 + cubeCenterY - targetY;
+    const double center = (kWorldSize - 1) * 0.5;
+    const Vec3 view = ViewTransform(center, center, center);
+    gApp.cameraX = (view.x - view.y) * kHalfW * gApp.zoom;
+    gApp.cameraY = ((view.x + view.y) * ViewHalfH() - view.z * ViewLayerH()) * gApp.zoom;
 }
 
 RectF ActorBounds(int playerIndex, int sphereIndex) {
@@ -1282,7 +1253,7 @@ void ApplyViewRotation(const int rotation[9]) {
     std::copy(next, next + 9, gApp.view);
     ++gApp.viewTurns;
     if (gApp.playerSelected) BuildMoveOptions();
-    CenterCameraOnPlayer();
+    CenterCameraOnCube();
     InvalidateRect(gApp.hwnd, nullptr, FALSE);
 }
 
