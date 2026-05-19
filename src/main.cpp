@@ -44,6 +44,7 @@ constexpr int kHalfH = kFootprintH / 2;
 constexpr int kWorldSize = 24;
 constexpr int kPlayers = 2;
 constexpr int kSpheresPerPlayer = 3;
+constexpr int kArcLanceRange = 4;
 constexpr int kUrbanCell = 6;
 constexpr int kUrbanFloor = 5;
 constexpr double kDefaultZoom = 1.53;
@@ -88,6 +89,13 @@ struct RenderTile {
     double scale = 1.0;
 };
 
+enum class OptionKind {
+    Move,
+    Tunnel,
+    ArcLance,
+    BreachCharge,
+};
+
 struct MoveOption {
     int x = 0;
     int y = 0;
@@ -95,8 +103,7 @@ struct MoveOption {
     int dx = 0;
     int dy = 0;
     int dz = 0;
-    bool tunnel = false;
-    bool attack = false;
+    OptionKind kind = OptionKind::Move;
     std::wstring facing = L"S";
 };
 
@@ -807,19 +814,58 @@ bool PointInCellDiamond(int screenX, int screenY, int cellX, int cellY, int cell
     return dx + dy <= 1.08;
 }
 
+bool IsForceOption(OptionKind kind) {
+    return kind == OptionKind::Tunnel || kind == OptionKind::ArcLance || kind == OptionKind::BreachCharge;
+}
+
 void DrawOptionHighlight(Graphics& graphics, const MoveOption& option) {
     PointF points[4] = {
         PointF(), PointF(), PointF(), PointF(),
     };
     CellDiamondPoints(option.x, option.y, option.z, points);
 
-    const bool force = option.tunnel || option.attack;
-    const Color fill = force ? Color(155, 255, 128, 38) : Color(125, 80, 220, 120);
-    const Color line = force ? Color(240, 255, 178, 66) : Color(225, 120, 255, 180);
+    Color fill = Color(125, 80, 220, 120);
+    Color line = Color(225, 120, 255, 180);
+    float width = 2.0f;
+    if (option.kind == OptionKind::Tunnel) {
+        fill = Color(145, 255, 135, 42);
+        line = Color(235, 255, 175, 70);
+    } else if (option.kind == OptionKind::ArcLance) {
+        fill = Color(170, 255, 42, 64);
+        line = Color(250, 255, 110, 130);
+        width = 3.0f;
+    } else if (option.kind == OptionKind::BreachCharge) {
+        fill = Color(150, 255, 180, 54);
+        line = Color(240, 255, 220, 100);
+        width = 2.6f;
+    }
     SolidBrush brush(fill);
-    Pen pen(line, 2.0f);
+    Pen pen(line, width);
+    if (option.kind == OptionKind::ArcLance) {
+        pen.SetDashStyle(Gdiplus::DashStyleDash);
+    }
+    if (option.kind == OptionKind::ArcLance || option.kind == OptionKind::BreachCharge) {
+        const Player& player = ActivePlayerConst();
+        const PointF start = WorldToScreen3(player.x, player.y, player.z);
+        const PointF end = WorldToScreen3(option.x, option.y, option.z);
+        Pen beam(option.kind == OptionKind::ArcLance ? Color(180, 255, 74, 95)
+                                                     : Color(135, 255, 180, 60),
+                 option.kind == OptionKind::ArcLance ? 2.5f : 2.0f);
+        if (option.kind == OptionKind::BreachCharge) {
+            beam.SetDashStyle(Gdiplus::DashStyleDot);
+        }
+        graphics.DrawLine(&beam, start, end);
+    }
     graphics.FillPolygon(&brush, points, 4);
     graphics.DrawPolygon(&pen, points, 4);
+
+    if (IsForceOption(option.kind)) {
+        const PointF center = WorldToScreen3(option.x, option.y, option.z);
+        const float r = static_cast<float>((option.kind == OptionKind::ArcLance ? 4.5 : 3.5) * gApp.zoom);
+        SolidBrush core(option.kind == OptionKind::ArcLance ? Color(235, 255, 220, 180)
+                                                            : Color(210, 255, 198, 95));
+        graphics.FillEllipse(&core, RectF(center.X - r, center.Y - r, r * 2.0f, r * 2.0f));
+    }
 }
 
 Color TunnelFillColor(int owner, bool occupied) {
@@ -1023,7 +1069,7 @@ void DrawHud(Graphics& graphics, int visibleCount) {
     }
 
     graphics.FillRectangle(&panel, RectF(18, static_cast<float>(gApp.height - 64), 520, 46));
-    graphics.DrawString(L"Click drone | Green move | Orange tunnel/attack | Find and kill the buried controller",
+    graphics.DrawString(L"Green move | Orange tunnel | Red arc-lance | Gold breach charge | Kill drones or controller",
                         -1, &hudFont, PointF(34, static_cast<float>(gApp.height - 50)), &muted);
 }
 
@@ -1332,18 +1378,59 @@ void BuildMoveOptions() {
             int sphereOwner = -1;
             int sphereIndex = -1;
             const bool occupied = OccupyingSphereAt(x, y, z, &sphereOwner, &sphereIndex);
-            if (occupied && sphereOwner == gApp.activePlayer) break;
+            if (occupied) break;
 
             int controllerOwner = -1;
             const bool controller = AnyControllerAt(x, y, z, &controllerOwner);
             if (controller && controllerOwner == gApp.activePlayer) break;
+            if (controller && !tunnel) break;
 
             if (tunnel && distance > 1) break;
-            const bool attack = (occupied && sphereOwner != gApp.activePlayer) ||
-                                (controller && controllerOwner != gApp.activePlayer);
             gApp.moveOptions.push_back(
-                {x, y, z, direction.dx, direction.dy, direction.dz, tunnel, attack, direction.facing});
-            if (tunnel || occupied || controller) break;
+                {x, y, z, direction.dx, direction.dy, direction.dz,
+                 tunnel ? OptionKind::Tunnel : OptionKind::Move, direction.facing});
+            if (tunnel || controller) break;
+        }
+
+        for (int distance = 1; distance <= kArcLanceRange; ++distance) {
+            const int x = player.x + direction.dx * distance;
+            const int y = player.y + direction.dy * distance;
+            const int z = player.z + direction.dz * distance;
+            if (!IsPlayableCell(x, y, z)) break;
+            if (SolidBlockAt(x, y, z)) break;
+
+            int sphereOwner = -1;
+            int sphereIndex = -1;
+            if (OccupyingSphereAt(x, y, z, &sphereOwner, &sphereIndex)) {
+                if (sphereOwner != gApp.activePlayer) {
+                    gApp.moveOptions.push_back(
+                        {x, y, z, direction.dx, direction.dy, direction.dz,
+                         OptionKind::ArcLance, direction.facing});
+                }
+                break;
+            }
+
+            int controllerOwner = -1;
+            if (AnyControllerAt(x, y, z, &controllerOwner)) {
+                if (controllerOwner != gApp.activePlayer && ControllerRevealed(controllerOwner)) {
+                    gApp.moveOptions.push_back(
+                        {x, y, z, direction.dx, direction.dy, direction.dz,
+                         OptionKind::ArcLance, direction.facing});
+                }
+                break;
+            }
+        }
+
+        const int bx = player.x + direction.dx;
+        const int by = player.y + direction.dy;
+        const int bz = player.z + direction.dz;
+        const int bx2 = player.x + direction.dx * 2;
+        const int by2 = player.y + direction.dy * 2;
+        const int bz2 = player.z + direction.dz * 2;
+        if (SolidBlockAt(bx, by, bz) && SolidBlockAt(bx2, by2, bz2)) {
+            gApp.moveOptions.push_back(
+                {bx2, by2, bz2, direction.dx, direction.dy, direction.dz,
+                 OptionKind::BreachCharge, direction.facing});
         }
     }
 }
@@ -1359,6 +1446,8 @@ void ClearSelection() {
     gApp.moveOptions.clear();
 }
 
+void EndTurn();
+
 void CheckVictory() {
     if (gApp.winner >= 0) return;
     for (int playerIndex = 0; playerIndex < kPlayers; ++playerIndex) {
@@ -1372,6 +1461,60 @@ void CheckVictory() {
             return;
         }
     }
+}
+
+bool DamageEnemyAt(int x, int y, int z) {
+    int sphereOwner = -1;
+    int sphereIndex = -1;
+    if (OccupyingSphereAt(x, y, z, &sphereOwner, &sphereIndex) && sphereOwner != gApp.activePlayer) {
+        gApp.players[sphereOwner][sphereIndex].alive = false;
+        return true;
+    }
+
+    int controllerOwner = -1;
+    if (AnyControllerAt(x, y, z, &controllerOwner) && controllerOwner != gApp.activePlayer) {
+        gApp.controllers[controllerOwner].alive = false;
+        return true;
+    }
+    return false;
+}
+
+bool FireArcLance(const MoveOption& option) {
+    if (gApp.winner >= 0) return false;
+    ActivePlayer().facing = option.facing;
+    if (!DamageEnemyAt(option.x, option.y, option.z)) return false;
+    CheckVictory();
+    EndTurn();
+    InvalidateRect(gApp.hwnd, nullptr, FALSE);
+    return true;
+}
+
+bool DetonateBreachCharge(const MoveOption& option) {
+    if (gApp.winner >= 0) return false;
+    ActivePlayer().facing = option.facing;
+
+    const Player& player = ActivePlayerConst();
+    const int firstX = player.x + option.dx;
+    const int firstY = player.y + option.dy;
+    const int firstZ = player.z + option.dz;
+
+    bool changed = false;
+    if (SolidBlockAt(firstX, firstY, firstZ)) {
+        RemoveBlockAt(firstX, firstY, firstZ);
+        changed = true;
+    }
+    if (SolidBlockAt(option.x, option.y, option.z)) {
+        RemoveBlockAt(option.x, option.y, option.z);
+        changed = true;
+    }
+
+    DamageEnemyAt(firstX, firstY, firstZ);
+    DamageEnemyAt(option.x, option.y, option.z);
+    CheckVictory();
+    if (!changed && gApp.winner < 0) return false;
+    EndTurn();
+    InvalidateRect(gApp.hwnd, nullptr, FALSE);
+    return true;
 }
 
 void EndTurn() {
@@ -1438,6 +1581,12 @@ void MovePlayer(int dx, int dy, const std::wstring& facing) {
 bool TryExecuteClickedOption(int screenX, int screenY) {
     for (const MoveOption& option : gApp.moveOptions) {
         if (PointInCellDiamond(screenX, screenY, option.x, option.y, option.z)) {
+            if (option.kind == OptionKind::ArcLance) {
+                return FireArcLance(option);
+            }
+            if (option.kind == OptionKind::BreachCharge) {
+                return DetonateBreachCharge(option);
+            }
             ActivePlayer().facing = option.facing;
             EnterOrDig(option.x, option.y, option.z, true);
             InvalidateRect(gApp.hwnd, nullptr, FALSE);
