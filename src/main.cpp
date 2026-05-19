@@ -93,6 +93,7 @@ enum class OptionKind {
     Move,
     Tunnel,
     ArcLance,
+    CloseZap,
     BreachCharge,
     CommanderMove,
 };
@@ -893,7 +894,7 @@ bool PointInCellDiamond(int screenX, int screenY, int cellX, int cellY, int cell
 }
 
 bool IsForceOption(OptionKind kind) {
-    return kind == OptionKind::Tunnel || kind == OptionKind::ArcLance ||
+    return kind == OptionKind::Tunnel || kind == OptionKind::ArcLance || kind == OptionKind::CloseZap ||
            kind == OptionKind::BreachCharge || kind == OptionKind::CommanderMove;
 }
 
@@ -913,6 +914,10 @@ void DrawOptionHighlight(Graphics& graphics, const MoveOption& option) {
         fill = Color(175, 225, 35, 255);
         line = Color(255, 255, 225, 255);
         width = 3.0f;
+    } else if (option.kind == OptionKind::CloseZap) {
+        fill = Color(185, 40, 235, 255);
+        line = Color(255, 170, 245, 255);
+        width = 3.4f;
     } else if (option.kind == OptionKind::BreachCharge) {
         fill = Color(150, 255, 180, 54);
         line = Color(240, 255, 220, 100);
@@ -924,11 +929,11 @@ void DrawOptionHighlight(Graphics& graphics, const MoveOption& option) {
     }
     SolidBrush brush(fill);
     Pen pen(line, width);
-    if (option.kind == OptionKind::ArcLance) {
+    if (option.kind == OptionKind::ArcLance || option.kind == OptionKind::CloseZap) {
         pen.SetDashStyle(Gdiplus::DashStyleDash);
     }
-    if (option.kind == OptionKind::ArcLance || option.kind == OptionKind::BreachCharge ||
-        option.kind == OptionKind::CommanderMove) {
+    if (option.kind == OptionKind::ArcLance || option.kind == OptionKind::CloseZap ||
+        option.kind == OptionKind::BreachCharge || option.kind == OptionKind::CommanderMove) {
         const PointF start = gApp.controllerSelected
                                  ? WorldToScreen3(gApp.controllers[gApp.activePlayer].x,
                                                   gApp.controllers[gApp.activePlayer].y,
@@ -936,10 +941,11 @@ void DrawOptionHighlight(Graphics& graphics, const MoveOption& option) {
                                  : WorldToScreen3(ActivePlayerConst().x, ActivePlayerConst().y,
                                                   ActivePlayerConst().z);
         const PointF end = WorldToScreen3(option.x, option.y, option.z);
-        Pen beam(option.kind == OptionKind::ArcLance ? Color(210, 255, 70, 255)
+        Pen beam((option.kind == OptionKind::ArcLance || option.kind == OptionKind::CloseZap)
+                     ? Color(210, 255, 70, 255)
                  : option.kind == OptionKind::CommanderMove ? Color(155, 190, 115, 255)
                                                             : Color(135, 255, 180, 60),
-                 option.kind == OptionKind::ArcLance ? 2.5f : 2.0f);
+                 (option.kind == OptionKind::ArcLance || option.kind == OptionKind::CloseZap) ? 2.5f : 2.0f);
         if (option.kind == OptionKind::BreachCharge || option.kind == OptionKind::CommanderMove) {
             beam.SetDashStyle(Gdiplus::DashStyleDot);
         }
@@ -950,8 +956,13 @@ void DrawOptionHighlight(Graphics& graphics, const MoveOption& option) {
 
     if (IsForceOption(option.kind)) {
         const PointF center = WorldToScreen3(option.x, option.y, option.z);
-        const float r = static_cast<float>((option.kind == OptionKind::ArcLance ? 4.5 : 3.5) * gApp.zoom);
-        SolidBrush core(option.kind == OptionKind::ArcLance ? Color(245, 255, 245, 255)
+        const float r = static_cast<float>(((option.kind == OptionKind::ArcLance ||
+                                             option.kind == OptionKind::CloseZap)
+                                                ? 4.8
+                                                : 3.5) *
+                                           gApp.zoom);
+        SolidBrush core((option.kind == OptionKind::ArcLance || option.kind == OptionKind::CloseZap)
+                            ? Color(245, 255, 245, 255)
                                                             : Color(210, 255, 198, 95));
         graphics.FillEllipse(&core, RectF(center.X - r, center.Y - r, r * 2.0f, r * 2.0f));
     }
@@ -1876,6 +1887,32 @@ void BuildMoveOptions() {
     }
 
     const Player& player = ActivePlayerConst();
+    for (int dx = -1; dx <= 1; ++dx) {
+        for (int dy = -1; dy <= 1; ++dy) {
+            for (int dz = -1; dz <= 1; ++dz) {
+                if (dx == 0 && dy == 0 && dz == 0) continue;
+                const int x = player.x + dx;
+                const int y = player.y + dy;
+                const int z = player.z + dz;
+                if (!IsPlayableCell(x, y, z)) continue;
+
+                int sphereOwner = -1;
+                int sphereIndex = -1;
+                if (OccupyingSphereAt(x, y, z, &sphereOwner, &sphereIndex) &&
+                    sphereOwner != gApp.activePlayer) {
+                    gApp.moveOptions.push_back({x, y, z, dx, dy, dz, OptionKind::CloseZap, L"ZAP"});
+                    continue;
+                }
+
+                int controllerOwner = -1;
+                if (AnyControllerAt(x, y, z, &controllerOwner) &&
+                    controllerOwner != gApp.activePlayer && ControllerRevealed(controllerOwner)) {
+                    gApp.moveOptions.push_back({x, y, z, dx, dy, dz, OptionKind::CloseZap, L"ZAP"});
+                }
+            }
+        }
+    }
+
     for (const Direction& direction : directions) {
         for (int distance = 1; distance <= 2; ++distance) {
             const int x = player.x + direction.dx * distance;
@@ -2013,7 +2050,8 @@ bool FireArcLance(const MoveOption& option) {
     ActivePlayer().facing = option.facing;
     const Player& shooter = ActivePlayerConst();
     wchar_t message[128] = {};
-    swprintf_s(message, L"%s arc-lance fired", PlayerLabel(gApp.activePlayer).c_str());
+    swprintf_s(message, option.kind == OptionKind::CloseZap ? L"%s close zap fired" : L"%s arc-lance fired",
+               PlayerLabel(gApp.activePlayer).c_str());
     AnnounceAction(message, 1100);
     if (!DamageEnemyAt(option.x, option.y, option.z)) return false;
     AddWeaponEffect(EffectKind::ArcLance, shooter.x, shooter.y, shooter.z,
@@ -2177,7 +2215,7 @@ void MovePlayer(int dx, int dy, const std::wstring& facing) {
 bool TryExecuteClickedOption(int screenX, int screenY) {
     for (const MoveOption& option : gApp.moveOptions) {
         if (PointInCellDiamond(screenX, screenY, option.x, option.y, option.z)) {
-            if (option.kind == OptionKind::ArcLance) {
+            if (option.kind == OptionKind::ArcLance || option.kind == OptionKind::CloseZap) {
                 return FireArcLance(option);
             }
             if (option.kind == OptionKind::BreachCharge) {
