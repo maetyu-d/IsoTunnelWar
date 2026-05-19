@@ -870,18 +870,11 @@ void DrawPlayerSphere(Graphics& graphics, int playerIndex, int sphereIndex) {
 
 void DrawHud(Graphics& graphics, int visibleCount) {
     SolidBrush panel(Color(210, 12, 18, 16));
-    SolidBrush text(Color(245, 240, 223));
     SolidBrush muted(Color(185, 194, 171));
-    SolidBrush accent(Color(216, 179, 90));
     FontFamily sans(L"Segoe UI");
-    FontFamily serif(L"Georgia");
-    Font titleFont(&serif, 26.0f, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
     Font hudFont(&sans, 13.0f, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
-    Font labelFont(&sans, 12.0f, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
 
-    graphics.FillRectangle(&panel, RectF(18, 18, static_cast<float>(gApp.width - 36), 72));
-    graphics.DrawString(L"Small Iso", -1, &labelFont, PointF(34, 30), &accent);
-    graphics.DrawString(L"3D Island", -1, &titleFont, PointF(32, 46), &text);
+    graphics.FillRectangle(&panel, RectF(18, 18, static_cast<float>(gApp.width - 36), 44));
 
     wchar_t stats[256] = {};
     const Player& player = ActivePlayerConst();
@@ -891,16 +884,14 @@ void DrawHud(Graphics& graphics, int visibleCount) {
                player.x, player.y, player.z,
                PositiveMod(gApp.viewTurns, 24),
                gApp.removedBlocks.size(), visibleCount, gApp.zoom);
-    graphics.DrawString(stats, -1, &hudFont, PointF(300, 46), &muted);
+    graphics.DrawString(stats, -1, &hudFont, PointF(34, 32), &muted);
 
     graphics.FillRectangle(&panel, RectF(18, static_cast<float>(gApp.height - 64), 520, 46));
     graphics.DrawString(L"Click any active-side sphere | Green move | Orange tunnel | WASD rotate 90 degrees | Drag pan",
                         -1, &hudFont, PointF(34, static_cast<float>(gApp.height - 50)), &muted);
 }
 
-void DrawHellscapeBackground(Graphics& graphics) {
-    const float width = static_cast<float>(gApp.width);
-    const float height = static_cast<float>(gApp.height);
+void DrawHellscapeBackgroundLayer(Graphics& graphics, float width, float height) {
     const RectF skyRect(0, 0, width, height);
     LinearGradientBrush sky(skyRect, Color(255, 5, 6, 10), Color(255, 96, 20, 8),
                             Gdiplus::LinearGradientModeVertical);
@@ -975,6 +966,20 @@ void DrawHellscapeBackground(Graphics& graphics) {
     graphics.FillRectangle(&vignette, RectF(0, 0, width, height * 0.06f));
     graphics.FillRectangle(&vignette, RectF(0, 0, width * 0.04f, height));
     graphics.FillRectangle(&vignette, RectF(width * 0.96f, 0, width * 0.04f, height));
+}
+
+void DrawHellscapeBackground(Graphics& graphics) {
+    const int blurW = std::max(1, gApp.width / 4);
+    const int blurH = std::max(1, gApp.height / 4);
+    Bitmap skyBuffer(blurW, blurH, PixelFormat32bppPARGB);
+    Graphics skyGraphics(&skyBuffer);
+    skyGraphics.SetSmoothingMode(Gdiplus::SmoothingModeHighQuality);
+    skyGraphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+    skyGraphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
+    DrawHellscapeBackgroundLayer(skyGraphics, static_cast<float>(blurW), static_cast<float>(blurH));
+
+    graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+    graphics.DrawImage(&skyBuffer, RectF(0, 0, static_cast<float>(gApp.width), static_cast<float>(gApp.height)));
 }
 
 void DrawScene(HDC hdc) {
