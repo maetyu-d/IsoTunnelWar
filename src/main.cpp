@@ -1217,33 +1217,62 @@ void DrawWeaponEffects(Graphics& graphics) {
         const PointF end = WorldToScreen3(effect.x2, effect.y2, effect.z2);
 
         if (effect.kind == EffectKind::ArcLance) {
-            Pen bloom(Color(static_cast<BYTE>(125 * fade), 210, 45, 255),
-                      static_cast<float>((8.0 * fade + 2.0) * gApp.zoom));
+            Pen outerBloom(Color(static_cast<BYTE>(70 * fade), 140, 25, 255),
+                           static_cast<float>((22.0 * fade + 6.0) * gApp.zoom));
+            Pen bloom(Color(static_cast<BYTE>(185 * fade), 210, 45, 255),
+                      static_cast<float>((13.0 * fade + 4.0) * gApp.zoom));
             Pen core(Color(static_cast<BYTE>(250 * fade), 255, 250, 255),
-                     static_cast<float>((2.2 * fade + 0.8) * gApp.zoom));
+                     static_cast<float>((4.5 * fade + 1.4) * gApp.zoom));
             Pen hot(Color(static_cast<BYTE>(225 * fade), 255, 80, 245),
-                    static_cast<float>((4.0 * fade + 1.0) * gApp.zoom));
+                    static_cast<float>((7.5 * fade + 2.0) * gApp.zoom));
+            graphics.DrawLine(&outerBloom, start, end);
             graphics.DrawLine(&bloom, start, end);
             graphics.DrawLine(&hot, start, end);
             graphics.DrawLine(&core, start, end);
+            for (int i = 0; i < 9; ++i) {
+                const double t = (i + 1) / 10.0;
+                const float px = static_cast<float>(start.X + (end.X - start.X) * t);
+                const float py = static_cast<float>(start.Y + (end.Y - start.Y) * t);
+                const float r = static_cast<float>((3.0 + Hash2(i, effect.x2, 9300) * 6.0) *
+                                                   fade * gApp.zoom);
+                SolidBrush bead(Color(static_cast<BYTE>(120 * fade), 255, 235, 255));
+                graphics.FillEllipse(&bead, RectF(px - r, py - r, r * 2.0f, r * 2.0f));
+            }
         } else if (effect.kind == EffectKind::BreachCharge) {
-            Pen shock(Color(static_cast<BYTE>(130 * fade), 255, 155, 45),
-                      static_cast<float>((5.0 * fade + 1.5) * gApp.zoom));
+            Pen blastGlow(Color(static_cast<BYTE>(80 * fade), 255, 98, 10),
+                          static_cast<float>((16.0 * fade + 5.0) * gApp.zoom));
+            Pen shock(Color(static_cast<BYTE>(205 * fade), 255, 180, 60),
+                      static_cast<float>((9.0 * fade + 3.0) * gApp.zoom));
+            blastGlow.SetDashStyle(Gdiplus::DashStyleDash);
             shock.SetDashStyle(Gdiplus::DashStyleDash);
+            graphics.DrawLine(&blastGlow, start, end);
             graphics.DrawLine(&shock, start, end);
+            for (int i = 0; i < 11; ++i) {
+                const double angle = (i / 11.0) * 6.28318530718 + Hash2(i, effect.x2, 9400);
+                const float len = static_cast<float>((18.0 + Hash2(i, effect.z2, 9401) * 32.0) *
+                                                     fade * gApp.zoom);
+                Pen chip(Color(static_cast<BYTE>(155 * fade), 255, 124, 42),
+                         static_cast<float>((1.0 + fade) * gApp.zoom));
+                graphics.DrawLine(&chip, end,
+                                  PointF(end.X + static_cast<float>(std::cos(angle) * len),
+                                         end.Y + static_cast<float>(std::sin(angle) * len * 0.55)));
+            }
         } else if (effect.kind == EffectKind::DroneDeath) {
             const float flare = static_cast<float>((1.0 - age * 0.35) * gApp.zoom);
-            SolidBrush flash(Color(static_cast<BYTE>(210 * fade), 255, 205, 95));
-            SolidBrush smoke(Color(static_cast<BYTE>(110 * fade), 12, 10, 12));
-            Pen sparks(Color(static_cast<BYTE>(210 * fade), 255, 155, 55),
-                       static_cast<float>((1.0 + fade * 1.4) * gApp.zoom));
-            graphics.FillEllipse(&smoke, RectF(end.X - 22.0f * flare, end.Y - 16.0f * flare,
-                                              44.0f * flare, 32.0f * flare));
-            graphics.FillEllipse(&flash, RectF(end.X - 10.0f * flare, end.Y - 10.0f * flare,
-                                              20.0f * flare, 20.0f * flare));
-            for (int i = 0; i < 7; ++i) {
-                const double angle = (i / 7.0) * 6.28318530718 + Hash2(effect.x2 + i, effect.y2, 9100);
-                const float len = static_cast<float>((12.0 + Hash2(i, effect.z2, 9101) * 16.0) * fade *
+            SolidBrush smoke(Color(static_cast<BYTE>(150 * fade), 10, 8, 9));
+            SolidBrush fireGlow(Color(static_cast<BYTE>(150 * fade), 255, 86, 24));
+            SolidBrush flash(Color(static_cast<BYTE>(245 * fade), 255, 230, 130));
+            Pen sparks(Color(static_cast<BYTE>(245 * fade), 255, 170, 45),
+                       static_cast<float>((1.8 + fade * 2.5) * gApp.zoom));
+            graphics.FillEllipse(&smoke, RectF(end.X - 42.0f * flare, end.Y - 30.0f * flare,
+                                              84.0f * flare, 60.0f * flare));
+            graphics.FillEllipse(&fireGlow, RectF(end.X - 28.0f * flare, end.Y - 24.0f * flare,
+                                                 56.0f * flare, 48.0f * flare));
+            graphics.FillEllipse(&flash, RectF(end.X - 17.0f * flare, end.Y - 17.0f * flare,
+                                              34.0f * flare, 34.0f * flare));
+            for (int i = 0; i < 24; ++i) {
+                const double angle = (i / 24.0) * 6.28318530718 + Hash2(effect.x2 + i, effect.y2, 9100);
+                const float len = static_cast<float>((20.0 + Hash2(i, effect.z2, 9101) * 40.0) * fade *
                                                      gApp.zoom);
                 graphics.DrawLine(&sparks, end,
                                   PointF(end.X + static_cast<float>(std::cos(angle) * len),
@@ -1252,8 +1281,8 @@ void DrawWeaponEffects(Graphics& graphics) {
         }
 
         const float radius = static_cast<float>((effect.kind == EffectKind::ArcLance ? 14.0
-                                                : effect.kind == EffectKind::DroneDeath ? 20.0
-                                                                                       : 18.0) *
+                                                : effect.kind == EffectKind::DroneDeath ? 42.0
+                                                                                       : 30.0) *
                                                 (0.45 + age) * gApp.zoom);
         SolidBrush glow(effect.kind == EffectKind::ArcLance
                             ? Color(static_cast<BYTE>(165 * fade), 220, 35, 255)
@@ -1957,7 +1986,7 @@ bool DamageEnemyAt(int x, int y, int z) {
     int sphereIndex = -1;
     if (OccupyingSphereAt(x, y, z, &sphereOwner, &sphereIndex) && sphereOwner != gApp.activePlayer) {
         gApp.players[sphereOwner][sphereIndex].alive = false;
-        AddWeaponEffect(EffectKind::DroneDeath, x, y, z, x, y, z, 620);
+        AddWeaponEffect(EffectKind::DroneDeath, x, y, z, x, y, z, 1200);
         ScorchDroneDeathArea(x, y, z);
         wchar_t message[128] = {};
         swprintf_s(message, L"%s destroyed %s drone %d",
@@ -1988,7 +2017,7 @@ bool FireArcLance(const MoveOption& option) {
     AnnounceAction(message, 1100);
     if (!DamageEnemyAt(option.x, option.y, option.z)) return false;
     AddWeaponEffect(EffectKind::ArcLance, shooter.x, shooter.y, shooter.z,
-                    option.x, option.y, option.z, 520);
+                    option.x, option.y, option.z, 900);
     CheckVictory();
     EndTurn();
     InvalidateRect(gApp.hwnd, nullptr, FALSE);
@@ -2021,7 +2050,7 @@ bool DetonateBreachCharge(const MoveOption& option) {
     DamageEnemyAt(firstX, firstY, firstZ);
     DamageEnemyAt(option.x, option.y, option.z);
     AddWeaponEffect(EffectKind::BreachCharge, player.x, player.y, player.z,
-                    option.x, option.y, option.z, 620);
+                    option.x, option.y, option.z, 1050);
     CheckVictory();
     if (!changed && gApp.winner < 0) return false;
     EndTurn();
