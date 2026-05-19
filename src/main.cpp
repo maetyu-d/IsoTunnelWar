@@ -1521,7 +1521,7 @@ bool UpdateCameraEase() {
         return false;
     }
 
-    const double ease = 0.34;
+    const double ease = 0.92;
     gApp.cameraX += dx * ease;
     gApp.cameraY += dy * ease;
     return true;
