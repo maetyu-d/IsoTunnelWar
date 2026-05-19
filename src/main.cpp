@@ -1005,6 +1005,26 @@ void DrawTerrainImage(Graphics& graphics, Bitmap* image, const RectF& dest) {
                        &attrs);
 }
 
+void DrawBlockAtmosphere(Graphics& graphics, int x, int y, int z) {
+    PointF points[4] = {PointF(), PointF(), PointF(), PointF()};
+    CellDiamondPoints(x, y, z, points);
+
+    const PointF center = WorldToScreen3(x, y, z);
+    const double rightness = Clamp(center.X / std::max(1, gApp.width), 0.0, 1.0);
+    const double heightGlow = Clamp(static_cast<double>(z) / (kWorldSize - 1), 0.0, 1.0);
+    const int warmAlpha = static_cast<int>(28 + rightness * 42 + heightGlow * 18);
+    const int coolAlpha = static_cast<int>(18 + (1.0 - rightness) * 34);
+
+    Pen warmRim(Color(static_cast<BYTE>(std::min(120, warmAlpha)), 255, 98, 42),
+                static_cast<float>(1.0 + 0.5 * gApp.zoom));
+    Pen coolShade(Color(static_cast<BYTE>(std::min(90, coolAlpha)), 25, 13, 38),
+                  static_cast<float>(0.8 + 0.35 * gApp.zoom));
+    graphics.DrawLine(&warmRim, points[0], points[1]);
+    graphics.DrawLine(&warmRim, points[1], points[2]);
+    graphics.DrawLine(&coolShade, points[2], points[3]);
+    graphics.DrawLine(&coolShade, points[3], points[0]);
+}
+
 void DrawPlayerSphere(Graphics& graphics, int playerIndex, int sphereIndex) {
     const Player& player = gApp.players[playerIndex][sphereIndex];
     if (!player.alive) return;
@@ -1208,6 +1228,43 @@ void DrawHellscapeBackground(Graphics& graphics) {
     graphics.DrawImage(&skyBuffer, RectF(0, 0, static_cast<float>(gApp.width), static_cast<float>(gApp.height)));
 }
 
+void DrawWorldHaze(Graphics& graphics) {
+    const RectF lower(0, static_cast<float>(gApp.height) * 0.18f,
+                      static_cast<float>(gApp.width), static_cast<float>(gApp.height) * 0.82f);
+    LinearGradientBrush emberMist(lower, Color(0, 0, 0, 0), Color(72, 92, 18, 8),
+                                  Gdiplus::LinearGradientModeVertical);
+    graphics.FillRectangle(&emberMist, lower);
+
+    const RectF mid(0, static_cast<float>(gApp.height) * 0.30f,
+                    static_cast<float>(gApp.width), static_cast<float>(gApp.height) * 0.44f);
+    LinearGradientBrush sideGlow(mid, Color(8, 255, 80, 22), Color(42, 12, 2, 8),
+                                 Gdiplus::LinearGradientModeHorizontal);
+    graphics.FillRectangle(&sideGlow, mid);
+
+    SolidBrush dust(Color(28, 120, 34, 12));
+    graphics.FillEllipse(&dust, RectF(static_cast<float>(gApp.width) * -0.10f,
+                                      static_cast<float>(gApp.height) * 0.58f,
+                                      static_cast<float>(gApp.width) * 0.60f,
+                                      static_cast<float>(gApp.height) * 0.18f));
+    graphics.FillEllipse(&dust, RectF(static_cast<float>(gApp.width) * 0.58f,
+                                      static_cast<float>(gApp.height) * 0.52f,
+                                      static_cast<float>(gApp.width) * 0.54f,
+                                      static_cast<float>(gApp.height) * 0.16f));
+}
+
+void DrawSharedVignette(Graphics& graphics) {
+    const float width = static_cast<float>(gApp.width);
+    const float height = static_cast<float>(gApp.height);
+    SolidBrush edge(Color(80, 0, 0, 0));
+    graphics.FillRectangle(&edge, RectF(0, 0, width, height * 0.055f));
+    graphics.FillRectangle(&edge, RectF(0, height * 0.88f, width, height * 0.12f));
+    graphics.FillRectangle(&edge, RectF(0, 0, width * 0.035f, height));
+    graphics.FillRectangle(&edge, RectF(width * 0.965f, 0, width * 0.035f, height));
+
+    SolidBrush warmLens(Color(20, 125, 18, 6));
+    graphics.FillRectangle(&warmLens, RectF(0, 0, width, height));
+}
+
 void DrawScene(HDC hdc) {
     Bitmap backBuffer(gApp.width, gApp.height, PixelFormat32bppPARGB);
     Graphics graphics(&backBuffer);
@@ -1263,6 +1320,7 @@ void DrawScene(HDC hdc) {
                 CellDiamondPoints(renderTile.x, renderTile.y, renderTile.z, points);
                 Pen topPen(Color(135, 255, 170, 92), 1.0f);
                 graphics.DrawPolygon(&topPen, points, 4);
+                DrawBlockAtmosphere(graphics, renderTile.x, renderTile.y, renderTile.z);
             }
         }
     }
@@ -1314,6 +1372,8 @@ void DrawScene(HDC hdc) {
         DrawPlayerSphere(graphics, gApp.activePlayer, sphereIndex);
     }
     DrawPlayerSphere(graphics, gApp.activePlayer, gApp.activeSphere);
+    DrawWorldHaze(graphics);
+    DrawSharedVignette(graphics);
 
     int visibleCount = 0;
     for (const RenderTile& renderTile : renderTiles) {
