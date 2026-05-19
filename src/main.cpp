@@ -1407,13 +1407,6 @@ void DrawHellscapeBackgroundLayer(Graphics& graphics, float width, float height)
         graphics.FillEllipse(&band, RectF(x - w * 0.5f, y, w, h));
     }
 
-    for (int i = 0; i < 20; ++i) {
-        const float y = static_cast<float>(height * (0.25 + i * 0.026));
-        Pen heatBand(Color(38, 120, 26, 8), static_cast<float>(4.0 + Hash2(i, 7, 4200) * 14.0));
-        graphics.DrawLine(&heatBand, PointF(-width * 0.12f, y),
-                          PointF(width * 1.12f, y + static_cast<float>(Hash2(i, 9, 4202) * 22.0 - 11.0)));
-    }
-
     SolidBrush ridgeBack(Color(120, 2, 3, 5));
     SolidBrush ridgeFront(Color(210, 0, 0, 1));
     PointF backRidge[18] = {};
@@ -1483,17 +1476,14 @@ void DrawHellscapeBackground(Graphics& graphics) {
 }
 
 void DrawWorldHaze(Graphics& graphics) {
-    const RectF lower(0, static_cast<float>(gApp.height) * 0.18f,
-                      static_cast<float>(gApp.width), static_cast<float>(gApp.height) * 0.82f);
-    LinearGradientBrush emberMist(lower, Color(0, 0, 0, 0), Color(72, 92, 18, 8),
+    const RectF full(0, 0, static_cast<float>(gApp.width), static_cast<float>(gApp.height));
+    LinearGradientBrush emberMist(full, Color(0, 0, 0, 0), Color(42, 92, 18, 8),
                                   Gdiplus::LinearGradientModeVertical);
-    graphics.FillRectangle(&emberMist, lower);
+    graphics.FillRectangle(&emberMist, full);
 
-    const RectF mid(0, static_cast<float>(gApp.height) * 0.30f,
-                    static_cast<float>(gApp.width), static_cast<float>(gApp.height) * 0.44f);
-    LinearGradientBrush sideGlow(mid, Color(8, 255, 80, 22), Color(42, 12, 2, 8),
+    LinearGradientBrush sideGlow(full, Color(6, 255, 80, 22), Color(24, 12, 2, 8),
                                  Gdiplus::LinearGradientModeHorizontal);
-    graphics.FillRectangle(&sideGlow, mid);
+    graphics.FillRectangle(&sideGlow, full);
 
     SolidBrush dust(Color(28, 120, 34, 12));
     graphics.FillEllipse(&dust, RectF(static_cast<float>(gApp.width) * -0.10f,
@@ -1522,15 +1512,14 @@ void DrawSharedVignette(Graphics& graphics) {
 void DrawCinematicGrade(Graphics& graphics) {
     const float width = static_cast<float>(gApp.width);
     const float height = static_cast<float>(gApp.height);
-    RectF horizonBand(0, height * 0.24f, width, height * 0.42f);
-    LinearGradientBrush planetWash(horizonBand, Color(32, 255, 84, 28), Color(0, 0, 0, 0),
+    RectF full(0, 0, width, height);
+    LinearGradientBrush planetWash(full, Color(18, 255, 84, 28), Color(0, 0, 0, 0),
                                    Gdiplus::LinearGradientModeHorizontal);
-    graphics.FillRectangle(&planetWash, horizonBand);
+    graphics.FillRectangle(&planetWash, full);
 
-    RectF upperShade(0, 0, width, height * 0.52f);
-    LinearGradientBrush coolFalloff(upperShade, Color(52, 2, 3, 12), Color(0, 0, 0, 0),
+    LinearGradientBrush coolFalloff(full, Color(34, 2, 3, 12), Color(0, 0, 0, 0),
                                     Gdiplus::LinearGradientModeVertical);
-    graphics.FillRectangle(&coolFalloff, upperShade);
+    graphics.FillRectangle(&coolFalloff, full);
 }
 
 bool RectVisible(const RectF& bounds, float padding = 48.0f) {
