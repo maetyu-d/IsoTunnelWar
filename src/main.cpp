@@ -1075,21 +1075,21 @@ void DrawHud(Graphics& graphics, int visibleCount) {
 
 void DrawHellscapeBackgroundLayer(Graphics& graphics, float width, float height) {
     const RectF skyRect(0, 0, width, height);
-    LinearGradientBrush sky(skyRect, Color(255, 2, 5, 16), Color(255, 120, 22, 7),
+    LinearGradientBrush sky(skyRect, Color(255, 0, 2, 9), Color(255, 34, 7, 5),
                             Gdiplus::LinearGradientModeVertical);
     graphics.FillRectangle(&sky, skyRect);
 
-    LinearGradientBrush horizon(skyRect, Color(0, 0, 0, 0), Color(185, 210, 40, 7),
+    LinearGradientBrush horizon(skyRect, Color(0, 0, 0, 0), Color(90, 105, 18, 6),
                              Gdiplus::LinearGradientModeVertical);
     graphics.FillRectangle(&horizon, skyRect);
 
     const float planetX = width * 0.70f;
     const float planetY = height * 0.42f;
     const float planetR = std::min(width, height) * 0.46f;
-    SolidBrush planetOuterGlow(Color(70, 255, 82, 12));
-    SolidBrush planetGlow(Color(112, 235, 52, 9));
-    SolidBrush planetBody(Color(155, 154, 28, 8));
-    SolidBrush planetHotCore(Color(130, 245, 67, 11));
+    SolidBrush planetOuterGlow(Color(34, 150, 42, 10));
+    SolidBrush planetGlow(Color(58, 135, 28, 8));
+    SolidBrush planetBody(Color(92, 70, 14, 7));
+    SolidBrush planetHotCore(Color(70, 120, 28, 8));
     graphics.FillEllipse(&planetOuterGlow, RectF(planetX - planetR * 1.82f, planetY - planetR * 1.82f,
                                                 planetR * 3.64f, planetR * 3.64f));
     graphics.FillEllipse(&planetGlow, RectF(planetX - planetR * 1.18f, planetY - planetR * 1.18f,
@@ -1099,7 +1099,7 @@ void DrawHellscapeBackgroundLayer(Graphics& graphics, float width, float height)
     graphics.FillEllipse(&planetHotCore, RectF(planetX - planetR * 0.86f, planetY - planetR * 0.83f,
                                               planetR * 1.72f, planetR * 1.54f));
 
-    SolidBrush eclipse(Color(225, 2, 4, 10));
+    SolidBrush eclipse(Color(238, 0, 1, 5));
     graphics.FillEllipse(&eclipse, RectF(planetX - planetR * 0.35f, planetY - planetR * 1.06f,
                                         planetR * 0.94f, planetR * 0.94f));
 
@@ -1108,20 +1108,20 @@ void DrawHellscapeBackgroundLayer(Graphics& graphics, float width, float height)
         const float x = static_cast<float>(Hash2(i, 2, 4101) * width);
         const float w = static_cast<float>(width * (0.58 + Hash2(i, 3, 4102) * 1.05));
         const float h = static_cast<float>(height * (0.025 + Hash2(i, 4, 4103) * 0.105));
-        SolidBrush band(Hash2(i, 5, 4104) > 0.40 ? Color(82, 255, 66, 12)
-                                                 : Color(74, 42, 8, 12));
+        SolidBrush band(Hash2(i, 5, 4104) > 0.40 ? Color(42, 140, 32, 10)
+                                                 : Color(48, 18, 5, 10));
         graphics.FillEllipse(&band, RectF(x - w * 0.5f, y, w, h));
     }
 
     for (int i = 0; i < 20; ++i) {
         const float y = static_cast<float>(height * (0.25 + i * 0.026));
-        Pen heatBand(Color(72, 235, 54, 10), static_cast<float>(4.0 + Hash2(i, 7, 4200) * 14.0));
+        Pen heatBand(Color(38, 120, 26, 8), static_cast<float>(4.0 + Hash2(i, 7, 4200) * 14.0));
         graphics.DrawLine(&heatBand, PointF(-width * 0.12f, y),
                           PointF(width * 1.12f, y + static_cast<float>(Hash2(i, 9, 4202) * 22.0 - 11.0)));
     }
 
-    SolidBrush ridgeBack(Color(95, 7, 6, 6));
-    SolidBrush ridgeFront(Color(165, 1, 1, 2));
+    SolidBrush ridgeBack(Color(120, 2, 3, 5));
+    SolidBrush ridgeFront(Color(210, 0, 0, 1));
     PointF backRidge[18] = {};
     PointF frontRidge[18] = {};
     for (int i = 0; i < 18; ++i) {
@@ -1145,7 +1145,7 @@ void DrawHellscapeBackgroundLayer(Graphics& graphics, float width, float height)
         const float y = static_cast<float>(Hash2(i, 3, 4501) * height * 0.58);
         const float size = static_cast<float>(0.55 + Hash2(i, 4, 4502) * 2.35);
         const bool star = Hash2(i, 5, 4503) > 0.20;
-        SolidBrush point(star ? Color(205, 210, 226, 255) : Color(150, 255, 116, 44));
+        SolidBrush point(star ? Color(185, 198, 226, 255) : Color(78, 155, 84, 40));
         graphics.FillEllipse(&point, RectF(x, y, size, size));
     }
 
@@ -1153,14 +1153,17 @@ void DrawHellscapeBackgroundLayer(Graphics& graphics, float width, float height)
         const float x = static_cast<float>(Hash2(i, 6, 4550) * width);
         const float y = static_cast<float>(Hash2(i, 7, 4551) * height * 0.52);
         const float size = static_cast<float>(1.7 + Hash2(i, 8, 4552) * 3.8);
-        SolidBrush bright(Color(220, 230, 236, 255));
+        SolidBrush bright(Color(190, 210, 236, 255));
         graphics.FillEllipse(&bright, RectF(x, y, size, size));
     }
 
-    SolidBrush defocus(Color(52, 11, 4, 8));
+    SolidBrush defocus(Color(92, 2, 1, 4));
     graphics.FillRectangle(&defocus, skyRect);
 
-    SolidBrush vignette(Color(72, 0, 0, 0));
+    SolidBrush dusk(Color(82, 0, 0, 0));
+    graphics.FillRectangle(&dusk, skyRect);
+
+    SolidBrush vignette(Color(118, 0, 0, 0));
     graphics.FillRectangle(&vignette, RectF(0, 0, width, height * 0.06f));
     graphics.FillRectangle(&vignette, RectF(0, 0, width * 0.04f, height));
     graphics.FillRectangle(&vignette, RectF(width * 0.96f, 0, width * 0.04f, height));
