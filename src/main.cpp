@@ -174,6 +174,9 @@ struct AppState {
     bool controllerSelected = false;
     std::vector<MoveOption> moveOptions;
     std::vector<WeaponEffect> weaponEffects;
+    std::unique_ptr<Bitmap> skyCache;
+    int skyCacheW = 0;
+    int skyCacheH = 0;
     std::unordered_map<std::wstring, std::unique_ptr<Bitmap>> images;
     std::unordered_set<std::wstring> removedBlocks;
     std::unordered_map<std::wstring, int> tunnelOwners;
@@ -1009,16 +1012,19 @@ void DrawTunnelCell(Graphics& graphics, int x, int y, int z, bool occupied) {
 void DrawTerrainImage(Graphics& graphics, Bitmap* image, const RectF& dest) {
     if (!image) return;
 
-    const ColorMatrix matrix = {{
+    static const ColorMatrix matrix = {{
         {0.78f, 0.06f, 0.05f, 0.0f, 0.0f},
         {0.08f, 0.48f, 0.03f, 0.0f, 0.0f},
         {0.15f, 0.06f, 0.34f, 0.0f, 0.0f},
         {0.0f,  0.0f,  0.0f,  1.0f, 0.0f},
         {0.20f, 0.04f, 0.01f, 0.0f, 1.0f},
     }};
-
-    ImageAttributes attrs;
-    attrs.SetColorMatrix(&matrix);
+    static ImageAttributes attrs;
+    static bool initialized = false;
+    if (!initialized) {
+        attrs.SetColorMatrix(&matrix);
+        initialized = true;
+    }
     graphics.DrawImage(image, dest,
                        0.0f, 0.0f,
                        static_cast<Gdiplus::REAL>(image->GetWidth()),
@@ -1293,15 +1299,20 @@ void DrawHellscapeBackgroundLayer(Graphics& graphics, float width, float height)
 void DrawHellscapeBackground(Graphics& graphics) {
     const int blurW = std::max(1, gApp.width / 6);
     const int blurH = std::max(1, gApp.height / 6);
-    Bitmap skyBuffer(blurW, blurH, PixelFormat32bppPARGB);
-    Graphics skyGraphics(&skyBuffer);
-    skyGraphics.SetSmoothingMode(Gdiplus::SmoothingModeHighQuality);
-    skyGraphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
-    skyGraphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
-    DrawHellscapeBackgroundLayer(skyGraphics, static_cast<float>(blurW), static_cast<float>(blurH));
+    if (!gApp.skyCache || gApp.skyCacheW != blurW || gApp.skyCacheH != blurH) {
+        gApp.skyCache = std::make_unique<Bitmap>(blurW, blurH, PixelFormat32bppPARGB);
+        gApp.skyCacheW = blurW;
+        gApp.skyCacheH = blurH;
+        Graphics skyGraphics(gApp.skyCache.get());
+        skyGraphics.SetSmoothingMode(Gdiplus::SmoothingModeHighQuality);
+        skyGraphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+        skyGraphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
+        DrawHellscapeBackgroundLayer(skyGraphics, static_cast<float>(blurW), static_cast<float>(blurH));
+    }
 
     graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
-    graphics.DrawImage(&skyBuffer, RectF(0, 0, static_cast<float>(gApp.width), static_cast<float>(gApp.height)));
+    graphics.DrawImage(gApp.skyCache.get(),
+                       RectF(0, 0, static_cast<float>(gApp.width), static_cast<float>(gApp.height)));
 }
 
 void DrawWorldHaze(Graphics& graphics) {
@@ -1341,6 +1352,11 @@ void DrawSharedVignette(Graphics& graphics) {
     graphics.FillRectangle(&warmLens, RectF(0, 0, width, height));
 }
 
+bool RectVisible(const RectF& bounds, float padding = 48.0f) {
+    return bounds.GetRight() >= -padding && bounds.X <= gApp.width + padding &&
+           bounds.GetBottom() >= -padding && bounds.Y <= gApp.height + padding;
+}
+
 void DrawScene(HDC hdc) {
     Bitmap backBuffer(gApp.width, gApp.height, PixelFormat32bppPARGB);
     Graphics graphics(&backBuffer);
@@ -1374,6 +1390,7 @@ void DrawScene(HDC hdc) {
 
     const float spriteOffsetX = static_cast<float>(-kSpriteW * 0.5 * gApp.zoom);
     const float spriteOffsetY = static_cast<float>(-ViewHalfH() * gApp.zoom);
+    int visibleCount = 0;
 
     for (const RenderTile& renderTile : renderTiles) {
         Bitmap* image = ImageFor(renderTile.realm, renderTile.tile);
@@ -1383,14 +1400,19 @@ void DrawScene(HDC hdc) {
         if (renderTile.anchoredToFeet) {
             const float drawW = static_cast<float>(image->GetWidth() * renderTile.scale * gApp.zoom);
             const float drawH = static_cast<float>(image->GetHeight() * renderTile.scale * gApp.zoom);
-            DrawTerrainImage(graphics, image, RectF(pos.X - drawW * 0.5f,
-                                                    pos.Y + static_cast<float>(ViewHalfH() * gApp.zoom) - drawH,
-                                                    drawW, drawH));
+            const RectF bounds(pos.X - drawW * 0.5f,
+                               pos.Y + static_cast<float>(ViewHalfH() * gApp.zoom) - drawH,
+                               drawW, drawH);
+            if (!RectVisible(bounds)) continue;
+            ++visibleCount;
+            DrawTerrainImage(graphics, image, bounds);
         } else {
             const float drawW = static_cast<float>(kSpriteW * gApp.zoom);
             const float drawH = static_cast<float>(kSpriteH * gApp.zoom);
-            DrawTerrainImage(graphics, image, RectF(pos.X + spriteOffsetX, pos.Y + spriteOffsetY,
-                                                    drawW, drawH));
+            const RectF bounds(pos.X + spriteOffsetX, pos.Y + spriteOffsetY, drawW, drawH);
+            if (!RectVisible(bounds)) continue;
+            ++visibleCount;
+            DrawTerrainImage(graphics, image, bounds);
             if (!SolidBlockAt(renderTile.x, renderTile.y, renderTile.z + 1)) {
                 PointF points[4] = {PointF(), PointF(), PointF(), PointF()};
                 CellDiamondPoints(renderTile.x, renderTile.y, renderTile.z, points);
@@ -1451,28 +1473,6 @@ void DrawScene(HDC hdc) {
     DrawWeaponEffects(graphics);
     DrawWorldHaze(graphics);
     DrawSharedVignette(graphics);
-
-    int visibleCount = 0;
-    for (const RenderTile& renderTile : renderTiles) {
-        const PointF pos = WorldToScreen3(renderTile.x, renderTile.y, renderTile.z);
-        Bitmap* image = ImageFor(renderTile.realm, renderTile.tile);
-        const float drawW = renderTile.anchoredToFeet && image
-                                ? static_cast<float>(image->GetWidth() * renderTile.scale * gApp.zoom)
-                                : static_cast<float>(kSpriteW * gApp.zoom);
-        const float drawH = renderTile.anchoredToFeet && image
-                                ? static_cast<float>(image->GetHeight() * renderTile.scale * gApp.zoom)
-                                : static_cast<float>(kSpriteH * gApp.zoom);
-        const float boundsX = renderTile.anchoredToFeet ? pos.X - drawW * 0.5f : pos.X + spriteOffsetX;
-        const float boundsY = renderTile.anchoredToFeet
-                                  ? pos.Y + static_cast<float>(ViewHalfH() * gApp.zoom) - drawH
-                                  : pos.Y + spriteOffsetY;
-        const RectF bounds(boundsX, boundsY, drawW, drawH);
-        if (bounds.GetRight() < 0 || bounds.X > gApp.width || bounds.GetBottom() < 0 ||
-            bounds.Y > gApp.height) {
-            continue;
-        }
-        ++visibleCount;
-    }
 
     DrawHud(graphics, visibleCount);
 
