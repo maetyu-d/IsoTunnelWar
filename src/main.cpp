@@ -94,6 +94,7 @@ enum class OptionKind {
     Tunnel,
     ArcLance,
     BreachCharge,
+    CommanderMove,
 };
 
 struct MoveOption {
@@ -149,6 +150,7 @@ struct AppState {
     int view[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
     int viewTurns = 0;
     bool playerSelected = false;
+    bool controllerSelected = false;
     std::vector<MoveOption> moveOptions;
     std::unordered_map<std::wstring, std::unique_ptr<Bitmap>> images;
     std::unordered_set<std::wstring> removedBlocks;
@@ -490,6 +492,10 @@ bool ControllerRevealed(int playerIndex) {
     return false;
 }
 
+bool ControllerVisibleToActivePlayer(int playerIndex) {
+    return playerIndex == gApp.activePlayer || ControllerRevealed(playerIndex);
+}
+
 bool ExposedBlockAt(int x, int y, int z) {
     if (!SolidBlockAt(x, y, z)) return false;
 
@@ -815,7 +821,8 @@ bool PointInCellDiamond(int screenX, int screenY, int cellX, int cellY, int cell
 }
 
 bool IsForceOption(OptionKind kind) {
-    return kind == OptionKind::Tunnel || kind == OptionKind::ArcLance || kind == OptionKind::BreachCharge;
+    return kind == OptionKind::Tunnel || kind == OptionKind::ArcLance ||
+           kind == OptionKind::BreachCharge || kind == OptionKind::CommanderMove;
 }
 
 void DrawOptionHighlight(Graphics& graphics, const MoveOption& option) {
@@ -838,20 +845,30 @@ void DrawOptionHighlight(Graphics& graphics, const MoveOption& option) {
         fill = Color(150, 255, 180, 54);
         line = Color(240, 255, 220, 100);
         width = 2.6f;
+    } else if (option.kind == OptionKind::CommanderMove) {
+        fill = Color(145, 80, 235, 255);
+        line = Color(245, 155, 245, 255);
+        width = 2.8f;
     }
     SolidBrush brush(fill);
     Pen pen(line, width);
     if (option.kind == OptionKind::ArcLance) {
         pen.SetDashStyle(Gdiplus::DashStyleDash);
     }
-    if (option.kind == OptionKind::ArcLance || option.kind == OptionKind::BreachCharge) {
-        const Player& player = ActivePlayerConst();
-        const PointF start = WorldToScreen3(player.x, player.y, player.z);
+    if (option.kind == OptionKind::ArcLance || option.kind == OptionKind::BreachCharge ||
+        option.kind == OptionKind::CommanderMove) {
+        const PointF start = gApp.controllerSelected
+                                 ? WorldToScreen3(gApp.controllers[gApp.activePlayer].x,
+                                                  gApp.controllers[gApp.activePlayer].y,
+                                                  gApp.controllers[gApp.activePlayer].z)
+                                 : WorldToScreen3(ActivePlayerConst().x, ActivePlayerConst().y,
+                                                  ActivePlayerConst().z);
         const PointF end = WorldToScreen3(option.x, option.y, option.z);
         Pen beam(option.kind == OptionKind::ArcLance ? Color(180, 255, 74, 95)
-                                                     : Color(135, 255, 180, 60),
+                 : option.kind == OptionKind::CommanderMove ? Color(155, 190, 115, 255)
+                                                            : Color(135, 255, 180, 60),
                  option.kind == OptionKind::ArcLance ? 2.5f : 2.0f);
-        if (option.kind == OptionKind::BreachCharge) {
+        if (option.kind == OptionKind::BreachCharge || option.kind == OptionKind::CommanderMove) {
             beam.SetDashStyle(Gdiplus::DashStyleDot);
         }
         graphics.DrawLine(&beam, start, end);
@@ -1018,22 +1035,26 @@ void DrawPlayerSphere(Graphics& graphics, int playerIndex, int sphereIndex) {
 }
 
 void DrawControllerCore(Graphics& graphics, int playerIndex) {
-    if (!ControllerRevealed(playerIndex)) return;
+    if (!ControllerVisibleToActivePlayer(playerIndex)) return;
 
     const DroneController& controller = gApp.controllers[playerIndex];
     PointF points[4] = {PointF(), PointF(), PointF(), PointF()};
     CellDiamondPoints(controller.x, controller.y, controller.z, points);
 
     const bool blue = playerIndex == 0;
-    SolidBrush footprint(blue ? Color(160, 20, 70, 120) : Color(160, 120, 18, 28));
-    Pen outer(blue ? Color(245, 105, 205, 255) : Color(245, 255, 95, 95), 2.8f);
+    const bool selected = gApp.controllerSelected && playerIndex == gApp.activePlayer;
+    const bool revealed = ControllerRevealed(playerIndex);
+    SolidBrush footprint(blue ? Color(revealed ? 170 : 105, 20, 70, 120)
+                              : Color(revealed ? 170 : 105, 120, 18, 28));
+    Pen outer(blue ? Color(245, 105, 205, 255) : Color(245, 255, 95, 95), selected ? 4.0f : 2.8f);
     Pen inner(Color(235, 255, 222, 130), 1.4f);
     graphics.FillPolygon(&footprint, points, 4);
     graphics.DrawPolygon(&outer, points, 4);
 
     const PointF center = WorldToScreen3(controller.x, controller.y, controller.z);
     const float r = static_cast<float>(7.0 * gApp.zoom);
-    SolidBrush glow(blue ? Color(190, 90, 190, 255) : Color(190, 255, 80, 80));
+    SolidBrush glow(blue ? Color(revealed ? 190 : 135, 90, 190, 255)
+                         : Color(revealed ? 190 : 135, 255, 80, 80));
     SolidBrush hot(Color(235, 255, 220, 125));
     graphics.FillEllipse(&glow, RectF(center.X - r, center.Y - r * 1.15f, r * 2.0f, r * 2.0f));
     graphics.FillEllipse(&hot, RectF(center.X - r * 0.42f, center.Y - r * 0.56f,
@@ -1052,13 +1073,17 @@ void DrawHud(Graphics& graphics, int visibleCount) {
 
     wchar_t stats[256] = {};
     const Player& player = ActivePlayerConst();
-    swprintf_s(stats, L"cube: %dx%dx%d    turn: %d    active: P%d.%d action:%d/2    drones: %d-%d    ctrl: %c/%c    sphere: %d,%d,%d    visible: %d    zoom: %.2fx",
+    const DroneController& controller = gApp.controllers[gApp.activePlayer];
+    const wchar_t* activeUnit = gApp.controllerSelected ? L"commander" : L"drone";
+    swprintf_s(stats, L"cube: %dx%dx%d    turn: %d    active: P%d %s action:%d/2    drones: %d-%d    ctrl: %c/%c    unit: %d,%d,%d    visible: %d    zoom: %.2fx",
                kWorldSize, kWorldSize, kWorldSize,
-               gApp.turn, gApp.activePlayer + 1, gApp.activeSphere + 1, gApp.actionsThisPlayer + 1,
+               gApp.turn, gApp.activePlayer + 1, activeUnit, gApp.actionsThisPlayer + 1,
                LivingSphereCount(0), LivingSphereCount(1),
                gApp.controllers[0].alive ? L'A' : L'X',
                gApp.controllers[1].alive ? L'A' : L'X',
-               player.x, player.y, player.z,
+               gApp.controllerSelected ? controller.x : player.x,
+               gApp.controllerSelected ? controller.y : player.y,
+               gApp.controllerSelected ? controller.z : player.z,
                visibleCount, gApp.zoom);
     graphics.DrawString(stats, -1, &hudFont, PointF(34, 32), &muted);
     if (gApp.winner >= 0) {
@@ -1069,7 +1094,7 @@ void DrawHud(Graphics& graphics, int visibleCount) {
     }
 
     graphics.FillRectangle(&panel, RectF(18, static_cast<float>(gApp.height - 64), 520, 46));
-    graphics.DrawString(L"Green move | Orange tunnel | Red arc-lance | Gold breach charge | Kill drones or controller",
+    graphics.DrawString(L"Click drone or commander | Violet commander move spends whole turn | Kill drones or controller",
                         -1, &hudFont, PointF(34, static_cast<float>(gApp.height - 50)), &muted);
 }
 
@@ -1348,6 +1373,13 @@ RectF ActorBounds(int playerIndex, int sphereIndex) {
                  pos.Y + static_cast<float>(ViewHalfH() * gApp.zoom) - drawH, drawW, drawH);
 }
 
+RectF ControllerBounds(int playerIndex) {
+    const DroneController& controller = gApp.controllers[playerIndex];
+    const PointF center = WorldToScreen3(controller.x, controller.y, controller.z);
+    const float r = static_cast<float>(10.0 * gApp.zoom);
+    return RectF(center.X - r, center.Y - r * 1.35f, r * 2.0f, r * 2.4f);
+}
+
 bool PointInRect(const RectF& rect, int x, int y) {
     return x >= rect.X && x <= rect.GetRight() && y >= rect.Y && y <= rect.GetBottom();
 }
@@ -1355,7 +1387,6 @@ bool PointInRect(const RectF& rect, int x, int y) {
 void BuildMoveOptions() {
     gApp.moveOptions.clear();
     if (gApp.winner >= 0) return;
-    const Player& player = ActivePlayerConst();
     const struct Direction {
         int dx;
         int dy;
@@ -1370,6 +1401,28 @@ void BuildMoveOptions() {
         {0, 0, -1, L"D"},
     };
 
+    if (gApp.controllerSelected) {
+        const DroneController& controller = gApp.controllers[gApp.activePlayer];
+        for (const Direction& direction : directions) {
+            const int x = controller.x + direction.dx;
+            const int y = controller.y + direction.dy;
+            const int z = controller.z + direction.dz;
+            if (!InWorldCube(x, y, z)) continue;
+            int sphereOwner = -1;
+            int sphereIndex = -1;
+            if (OccupyingSphereAt(x, y, z, &sphereOwner, &sphereIndex) &&
+                sphereOwner == gApp.activePlayer) {
+                continue;
+            }
+            if (ControllerAt(1 - gApp.activePlayer, x, y, z)) continue;
+            gApp.moveOptions.push_back(
+                {x, y, z, direction.dx, direction.dy, direction.dz,
+                 OptionKind::CommanderMove, direction.facing});
+        }
+        return;
+    }
+
+    const Player& player = ActivePlayerConst();
     for (const Direction& direction : directions) {
         for (int distance = 1; distance <= 2; ++distance) {
             const int x = player.x + direction.dx * distance;
@@ -1440,12 +1493,21 @@ void BuildMoveOptions() {
 
 void SelectPlayer() {
     gApp.playerSelected = true;
+    gApp.controllerSelected = false;
+    BuildMoveOptions();
+    InvalidateRect(gApp.hwnd, nullptr, FALSE);
+}
+
+void SelectController() {
+    gApp.playerSelected = true;
+    gApp.controllerSelected = true;
     BuildMoveOptions();
     InvalidateRect(gApp.hwnd, nullptr, FALSE);
 }
 
 void ClearSelection() {
     gApp.playerSelected = false;
+    gApp.controllerSelected = false;
     gApp.moveOptions.clear();
 }
 
@@ -1536,6 +1598,40 @@ void EndTurn() {
     CenterCameraOnPlayer();
 }
 
+void EndEntirePlayerTurn() {
+    if (gApp.winner >= 0) {
+        ClearSelection();
+        return;
+    }
+    ++gApp.turn;
+    gApp.actionsThisPlayer = 0;
+    gApp.activePlayer = 1 - gApp.activePlayer;
+    gApp.activeSphere = FirstLivingSphere(gApp.activePlayer);
+    ClearSelection();
+    CenterCameraOnPlayer();
+}
+
+bool MoveCommander(const MoveOption& option) {
+    if (gApp.winner >= 0 || option.kind != OptionKind::CommanderMove) return false;
+    DroneController& controller = gApp.controllers[gApp.activePlayer];
+    if (!InWorldCube(option.x, option.y, option.z)) return false;
+
+    int sphereOwner = -1;
+    int sphereIndex = -1;
+    if (OccupyingSphereAt(option.x, option.y, option.z, &sphereOwner, &sphereIndex)) {
+        if (sphereOwner == gApp.activePlayer) return false;
+        gApp.players[sphereOwner][sphereIndex].alive = false;
+    }
+
+    controller.x = option.x;
+    controller.y = option.y;
+    controller.z = option.z;
+    CheckVictory();
+    EndEntirePlayerTurn();
+    InvalidateRect(gApp.hwnd, nullptr, FALSE);
+    return true;
+}
+
 bool EnterOrDig(int x, int y, int z, bool spendTurn) {
     if (gApp.winner >= 0) return false;
     if (!IsPlayableCell(x, y, z)) return false;
@@ -1590,6 +1686,9 @@ bool TryExecuteClickedOption(int screenX, int screenY) {
             if (option.kind == OptionKind::BreachCharge) {
                 return DetonateBreachCharge(option);
             }
+            if (option.kind == OptionKind::CommanderMove) {
+                return MoveCommander(option);
+            }
             ActivePlayer().facing = option.facing;
             EnterOrDig(option.x, option.y, option.z, true);
             InvalidateRect(gApp.hwnd, nullptr, FALSE);
@@ -1638,6 +1737,18 @@ void RotateViewDown() {
 void HandleLeftClick(int screenX, int screenY) {
     if (gApp.winner >= 0) return;
     if (gApp.playerSelected && TryExecuteClickedOption(screenX, screenY)) return;
+
+    if (gApp.controllers[gApp.activePlayer].alive &&
+        ControllerVisibleToActivePlayer(gApp.activePlayer) &&
+        PointInRect(ControllerBounds(gApp.activePlayer), screenX, screenY)) {
+        SelectController();
+        const DroneController& controller = gApp.controllers[gApp.activePlayer];
+        const Vec3 view = ViewTransform(controller.x, controller.y, controller.z);
+        gApp.cameraX = (view.x - view.y) * kHalfW * gApp.zoom;
+        gApp.cameraY = ((view.x + view.y) * ViewHalfH() - view.z * ViewLayerH()) * gApp.zoom;
+        InvalidateRect(gApp.hwnd, nullptr, FALSE);
+        return;
+    }
 
     for (int sphereIndex = kSpheresPerPlayer - 1; sphereIndex >= 0; --sphereIndex) {
         const Player& player = gApp.players[gApp.activePlayer][sphereIndex];
