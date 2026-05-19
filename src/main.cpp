@@ -97,6 +97,12 @@ enum class OptionKind {
     CommanderMove,
 };
 
+enum class EffectKind {
+    ArcLance,
+    BreachCharge,
+    Impact,
+};
+
 struct MoveOption {
     int x = 0;
     int y = 0;
@@ -106,6 +112,18 @@ struct MoveOption {
     int dz = 0;
     OptionKind kind = OptionKind::Move;
     std::wstring facing = L"S";
+};
+
+struct WeaponEffect {
+    EffectKind kind = EffectKind::Impact;
+    int x1 = 0;
+    int y1 = 0;
+    int z1 = 0;
+    int x2 = 0;
+    int y2 = 0;
+    int z2 = 0;
+    uint64_t started = 0;
+    uint64_t duration = 360;
 };
 
 struct Player {
@@ -130,6 +148,9 @@ struct AppState {
     int height = 720;
     double cameraX = 0.0;
     double cameraY = 0.0;
+    double targetCameraX = 0.0;
+    double targetCameraY = 0.0;
+    bool cameraReady = false;
     double zoom = kDefaultZoom;
     double density = 0.52;
     std::wstring seedText = L"wanderer";
@@ -152,6 +173,7 @@ struct AppState {
     bool playerSelected = false;
     bool controllerSelected = false;
     std::vector<MoveOption> moveOptions;
+    std::vector<WeaponEffect> weaponEffects;
     std::unordered_map<std::wstring, std::unique_ptr<Bitmap>> images;
     std::unordered_set<std::wstring> removedBlocks;
     std::unordered_map<std::wstring, int> tunnelOwners;
@@ -1025,6 +1047,60 @@ void DrawBlockAtmosphere(Graphics& graphics, int x, int y, int z) {
     graphics.DrawLine(&coolShade, points[3], points[0]);
 }
 
+void AddWeaponEffect(EffectKind kind, int x1, int y1, int z1, int x2, int y2, int z2,
+                     uint64_t duration = 420) {
+    gApp.weaponEffects.push_back({kind, x1, y1, z1, x2, y2, z2, GetTickCount64(), duration});
+}
+
+void DrawWeaponEffects(Graphics& graphics) {
+    const uint64_t now = GetTickCount64();
+    gApp.weaponEffects.erase(
+        std::remove_if(gApp.weaponEffects.begin(), gApp.weaponEffects.end(),
+                       [now](const WeaponEffect& effect) {
+                           return now - effect.started >= effect.duration;
+                       }),
+        gApp.weaponEffects.end());
+
+    for (const WeaponEffect& effect : gApp.weaponEffects) {
+        const double age = static_cast<double>(now - effect.started) /
+                           static_cast<double>(std::max<uint64_t>(1, effect.duration));
+        const double fade = Clamp(1.0 - age, 0.0, 1.0);
+        const PointF start = WorldToScreen3(effect.x1, effect.y1, effect.z1);
+        const PointF end = WorldToScreen3(effect.x2, effect.y2, effect.z2);
+
+        if (effect.kind == EffectKind::ArcLance) {
+            Pen bloom(Color(static_cast<BYTE>(110 * fade), 255, 32, 58),
+                      static_cast<float>((8.0 * fade + 2.0) * gApp.zoom));
+            Pen core(Color(static_cast<BYTE>(245 * fade), 255, 220, 190),
+                     static_cast<float>((2.2 * fade + 0.8) * gApp.zoom));
+            Pen hot(Color(static_cast<BYTE>(210 * fade), 255, 82, 112),
+                    static_cast<float>((4.0 * fade + 1.0) * gApp.zoom));
+            graphics.DrawLine(&bloom, start, end);
+            graphics.DrawLine(&hot, start, end);
+            graphics.DrawLine(&core, start, end);
+        } else if (effect.kind == EffectKind::BreachCharge) {
+            Pen shock(Color(static_cast<BYTE>(130 * fade), 255, 155, 45),
+                      static_cast<float>((5.0 * fade + 1.5) * gApp.zoom));
+            shock.SetDashStyle(Gdiplus::DashStyleDash);
+            graphics.DrawLine(&shock, start, end);
+        }
+
+        const float radius = static_cast<float>((effect.kind == EffectKind::ArcLance ? 14.0 : 18.0) *
+                                                (0.45 + age) * gApp.zoom);
+        SolidBrush glow(effect.kind == EffectKind::ArcLance
+                            ? Color(static_cast<BYTE>(150 * fade), 255, 48, 76)
+                            : Color(static_cast<BYTE>(140 * fade), 255, 168, 52));
+        Pen ring(effect.kind == EffectKind::ArcLance
+                     ? Color(static_cast<BYTE>(235 * fade), 255, 205, 180)
+                     : Color(static_cast<BYTE>(230 * fade), 255, 226, 125),
+                 static_cast<float>((2.0 + 2.0 * fade) * gApp.zoom));
+        graphics.FillEllipse(&glow, RectF(end.X - radius, end.Y - radius,
+                                          radius * 2.0f, radius * 2.0f));
+        graphics.DrawEllipse(&ring, RectF(end.X - radius, end.Y - radius,
+                                          radius * 2.0f, radius * 2.0f));
+    }
+}
+
 void DrawPlayerSphere(Graphics& graphics, int playerIndex, int sphereIndex) {
     const Player& player = gApp.players[playerIndex][sphereIndex];
     if (!player.alive) return;
@@ -1372,6 +1448,7 @@ void DrawScene(HDC hdc) {
         DrawPlayerSphere(graphics, gApp.activePlayer, sphereIndex);
     }
     DrawPlayerSphere(graphics, gApp.activePlayer, gApp.activeSphere);
+    DrawWeaponEffects(graphics);
     DrawWorldHaze(graphics);
     DrawSharedVignette(graphics);
 
@@ -1404,23 +1481,49 @@ void DrawScene(HDC hdc) {
 }
 
 void Pan(double dx, double dy, double multiplier) {
-    gApp.cameraX += dx * kFootprintW * gApp.zoom * multiplier;
-    gApp.cameraY += dy * kFootprintH * gApp.zoom * multiplier;
+    const double moveX = dx * kFootprintW * gApp.zoom * multiplier;
+    const double moveY = dy * kFootprintH * gApp.zoom * multiplier;
+    gApp.cameraX += moveX;
+    gApp.cameraY += moveY;
+    gApp.targetCameraX += moveX;
+    gApp.targetCameraY += moveY;
     InvalidateRect(gApp.hwnd, nullptr, FALSE);
 }
 
-void CenterCameraOnPlayer() {
-    const Player& player = ActivePlayerConst();
-    const Vec3 view = ViewTransform(player.x, player.y, player.z);
-    gApp.cameraX = (view.x - view.y) * kHalfW * gApp.zoom;
-    gApp.cameraY = ((view.x + view.y) * ViewHalfH() - view.z * ViewLayerH()) * gApp.zoom;
+void SetCameraTargetWorld(double x, double y, double z, bool immediate = false) {
+    const Vec3 view = ViewTransform(x, y, z);
+    gApp.targetCameraX = (view.x - view.y) * kHalfW * gApp.zoom;
+    gApp.targetCameraY = ((view.x + view.y) * ViewHalfH() - view.z * ViewLayerH()) * gApp.zoom;
+    if (immediate || !gApp.cameraReady) {
+        gApp.cameraX = gApp.targetCameraX;
+        gApp.cameraY = gApp.targetCameraY;
+        gApp.cameraReady = true;
+    }
 }
 
-void CenterCameraOnCube() {
+void CenterCameraOnPlayer(bool immediate = false) {
+    const Player& player = ActivePlayerConst();
+    SetCameraTargetWorld(player.x, player.y, player.z, immediate);
+}
+
+void CenterCameraOnCube(bool immediate = false) {
     const double center = (kWorldSize - 1) * 0.5;
-    const Vec3 view = ViewTransform(center, center, center);
-    gApp.cameraX = (view.x - view.y) * kHalfW * gApp.zoom;
-    gApp.cameraY = ((view.x + view.y) * ViewHalfH() - view.z * ViewLayerH()) * gApp.zoom;
+    SetCameraTargetWorld(center, center, center, immediate);
+}
+
+bool UpdateCameraEase() {
+    const double dx = gApp.targetCameraX - gApp.cameraX;
+    const double dy = gApp.targetCameraY - gApp.cameraY;
+    if (std::abs(dx) < 0.08 && std::abs(dy) < 0.08) {
+        gApp.cameraX = gApp.targetCameraX;
+        gApp.cameraY = gApp.targetCameraY;
+        return !gApp.weaponEffects.empty();
+    }
+
+    const double ease = 0.115;
+    gApp.cameraX += dx * ease;
+    gApp.cameraY += dy * ease;
+    return true;
 }
 
 RectF ActorBounds(int playerIndex, int sphereIndex) {
@@ -1607,7 +1710,10 @@ bool DamageEnemyAt(int x, int y, int z) {
 bool FireArcLance(const MoveOption& option) {
     if (gApp.winner >= 0) return false;
     ActivePlayer().facing = option.facing;
+    const Player& shooter = ActivePlayerConst();
     if (!DamageEnemyAt(option.x, option.y, option.z)) return false;
+    AddWeaponEffect(EffectKind::ArcLance, shooter.x, shooter.y, shooter.z,
+                    option.x, option.y, option.z, 520);
     CheckVictory();
     EndTurn();
     InvalidateRect(gApp.hwnd, nullptr, FALSE);
@@ -1635,6 +1741,8 @@ bool DetonateBreachCharge(const MoveOption& option) {
 
     DamageEnemyAt(firstX, firstY, firstZ);
     DamageEnemyAt(option.x, option.y, option.z);
+    AddWeaponEffect(EffectKind::BreachCharge, player.x, player.y, player.z,
+                    option.x, option.y, option.z, 620);
     CheckVictory();
     if (!changed && gApp.winner < 0) return false;
     EndTurn();
@@ -1803,9 +1911,7 @@ void HandleLeftClick(int screenX, int screenY) {
         PointInRect(ControllerBounds(gApp.activePlayer), screenX, screenY)) {
         SelectController();
         const DroneController& controller = gApp.controllers[gApp.activePlayer];
-        const Vec3 view = ViewTransform(controller.x, controller.y, controller.z);
-        gApp.cameraX = (view.x - view.y) * kHalfW * gApp.zoom;
-        gApp.cameraY = ((view.x + view.y) * ViewHalfH() - view.z * ViewLayerH()) * gApp.zoom;
+        SetCameraTargetWorld(controller.x, controller.y, controller.z);
         InvalidateRect(gApp.hwnd, nullptr, FALSE);
         return;
     }
@@ -1889,7 +1995,7 @@ void RandomizeSeed() {
     gApp.seedHash = HashString(gApp.seedText);
     ResetMatchPieces();
     gApp.zoom = kDefaultZoom;
-    CenterCameraOnCube();
+    CenterCameraOnCube(true);
     InvalidateRect(gApp.hwnd, nullptr, FALSE);
 }
 
@@ -1901,14 +2007,15 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
             LoadImages();
             ResetMatchPieces();
             gApp.zoom = kDefaultZoom;
-            CenterCameraOnCube();
+            CenterCameraOnCube(true);
+            SetTimer(hwnd, 1, 16, nullptr);
             return 0;
 
         case WM_SIZE:
             gApp.width = std::max(1, static_cast<int>(LOWORD(lParam)));
             gApp.height = std::max(1, static_cast<int>(HIWORD(lParam)));
             if (gApp.turn == 0 && !gApp.playerSelected) {
-                CenterCameraOnCube();
+                CenterCameraOnCube(true);
             }
             InvalidateRect(hwnd, nullptr, FALSE);
             return 0;
@@ -1931,6 +2038,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
                 }
                 gApp.cameraX = gApp.dragCameraX - (x - gApp.dragStart.x);
                 gApp.cameraY = gApp.dragCameraY - (y - gApp.dragStart.y);
+                gApp.targetCameraX = gApp.cameraX;
+                gApp.targetCameraY = gApp.cameraY;
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
             return 0;
@@ -1962,6 +2071,12 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
                            client.x + gApp.width / 2.0;
             gApp.cameraY = (gApp.cameraY + client.y - gApp.height / 2.0) * (gApp.zoom / oldZoom) -
                            client.y + gApp.height / 2.0;
+            gApp.targetCameraX = (gApp.targetCameraX + client.x - gApp.width / 2.0) *
+                                     (gApp.zoom / oldZoom) -
+                                 client.x + gApp.width / 2.0;
+            gApp.targetCameraY = (gApp.targetCameraY + client.y - gApp.height / 2.0) *
+                                     (gApp.zoom / oldZoom) -
+                                 client.y + gApp.height / 2.0;
             InvalidateRect(hwnd, nullptr, FALSE);
             return 0;
         }
@@ -1996,7 +2111,14 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
             return 0;
         }
 
+        case WM_TIMER:
+            if (UpdateCameraEase() || !gApp.weaponEffects.empty()) {
+                InvalidateRect(hwnd, nullptr, FALSE);
+            }
+            return 0;
+
         case WM_DESTROY:
+            KillTimer(hwnd, 1);
             PostQuitMessage(0);
             return 0;
     }
