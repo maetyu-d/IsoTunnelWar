@@ -1879,7 +1879,7 @@ void ApplyViewRotation(const int rotation[9]) {
     std::copy(next, next + 9, gApp.view);
     ++gApp.viewTurns;
     if (gApp.playerSelected) BuildMoveOptions();
-    CenterCameraOnCube();
+    CenterCameraOnCube(true);
     InvalidateRect(gApp.hwnd, nullptr, FALSE);
 }
 
