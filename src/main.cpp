@@ -1068,6 +1068,55 @@ void DrawTerrainImage(Graphics& graphics, Bitmap* image, const RectF& dest) {
                        &attrs);
 }
 
+void DrawBlockContactShadow(Graphics& graphics, int x, int y, int z) {
+    PointF points[4] = {PointF(), PointF(), PointF(), PointF()};
+    CellDiamondPoints(x, y, z, points);
+    const float drop = static_cast<float>((ViewLayerH() * 0.32 + 2.0) * gApp.zoom);
+    for (PointF& point : points) {
+        point.Y += drop;
+        point.X += static_cast<float>(3.0 * gApp.zoom);
+    }
+
+    const double depth = Clamp(static_cast<double>(z) / (kWorldSize - 1), 0.0, 1.0);
+    SolidBrush softShadow(Color(static_cast<BYTE>(26 + depth * 22), 0, 0, 0));
+    graphics.FillPolygon(&softShadow, points, 4);
+}
+
+void DrawTopSurfaceFidelity(Graphics& graphics, int x, int y, int z) {
+    PointF points[4] = {PointF(), PointF(), PointF(), PointF()};
+    CellDiamondPoints(x, y, z, points);
+    const PointF center = WorldToScreen3(x, y, z);
+    const float insetW = static_cast<float>(kHalfW * 0.62 * gApp.zoom);
+    const float insetH = static_cast<float>(ViewHalfH() * 0.62 * gApp.zoom);
+    PointF inner[4] = {
+        PointF(center.X, center.Y - insetH),
+        PointF(center.X + insetW, center.Y),
+        PointF(center.X, center.Y + insetH),
+        PointF(center.X - insetW, center.Y),
+    };
+
+    const double rightness = Clamp(center.X / std::max(1, gApp.width), 0.0, 1.0);
+    SolidBrush warmSheen(Color(static_cast<BYTE>(18 + rightness * 20), 255, 178, 92));
+    graphics.FillPolygon(&warmSheen, points, 4);
+
+    Pen bevelLight(Color(static_cast<BYTE>(130 + rightness * 70), 255, 216, 140), 1.0f);
+    Pen bevelDark(Color(95, 18, 9, 34), 1.0f);
+    Pen innerLine(Color(78, 255, 225, 155), 1.0f);
+    graphics.DrawLine(&bevelLight, points[3], points[0]);
+    graphics.DrawLine(&bevelLight, points[0], points[1]);
+    graphics.DrawLine(&bevelDark, points[1], points[2]);
+    graphics.DrawLine(&bevelDark, points[2], points[3]);
+    graphics.DrawPolygon(&innerLine, inner, 4);
+
+    if (Hash2(x, y + z * 7, 7600) > 0.56) {
+        const float jitter = static_cast<float>((Hash2(x, y, 7601) - 0.5) * 5.0 * gApp.zoom);
+        Pen hairline(Color(92, 20, 10, 28), 1.0f);
+        graphics.DrawLine(&hairline,
+                          PointF(center.X - insetW * 0.34f, center.Y + jitter),
+                          PointF(center.X + insetW * 0.28f, center.Y + jitter * 0.4f));
+    }
+}
+
 void DrawBlockAtmosphere(Graphics& graphics, int x, int y, int z) {
     PointF points[4] = {PointF(), PointF(), PointF(), PointF()};
     CellDiamondPoints(x, y, z, points);
@@ -1468,6 +1517,20 @@ void DrawSharedVignette(Graphics& graphics) {
     graphics.FillRectangle(&warmLens, RectF(0, 0, width, height));
 }
 
+void DrawCinematicGrade(Graphics& graphics) {
+    const float width = static_cast<float>(gApp.width);
+    const float height = static_cast<float>(gApp.height);
+    RectF horizonBand(0, height * 0.24f, width, height * 0.42f);
+    LinearGradientBrush planetWash(horizonBand, Color(32, 255, 84, 28), Color(0, 0, 0, 0),
+                                   Gdiplus::LinearGradientModeHorizontal);
+    graphics.FillRectangle(&planetWash, horizonBand);
+
+    RectF upperShade(0, 0, width, height * 0.52f);
+    LinearGradientBrush coolFalloff(upperShade, Color(52, 2, 3, 12), Color(0, 0, 0, 0),
+                                    Gdiplus::LinearGradientModeVertical);
+    graphics.FillRectangle(&coolFalloff, upperShade);
+}
+
 bool RectVisible(const RectF& bounds, float padding = 48.0f) {
     return bounds.GetRight() >= -padding && bounds.X <= gApp.width + padding &&
            bounds.GetBottom() >= -padding && bounds.Y <= gApp.height + padding;
@@ -1521,6 +1584,7 @@ void DrawScene(HDC hdc) {
                                drawW, drawH);
             if (!RectVisible(bounds)) continue;
             ++visibleCount;
+            DrawBlockContactShadow(graphics, renderTile.x, renderTile.y, renderTile.z);
             DrawTerrainImage(graphics, image, bounds);
         } else {
             const float drawW = static_cast<float>(kSpriteW * gApp.zoom);
@@ -1528,12 +1592,14 @@ void DrawScene(HDC hdc) {
             const RectF bounds(pos.X + spriteOffsetX, pos.Y + spriteOffsetY, drawW, drawH);
             if (!RectVisible(bounds)) continue;
             ++visibleCount;
+            DrawBlockContactShadow(graphics, renderTile.x, renderTile.y, renderTile.z);
             DrawTerrainImage(graphics, image, bounds);
             if (!SolidBlockAt(renderTile.x, renderTile.y, renderTile.z + 1)) {
                 PointF points[4] = {PointF(), PointF(), PointF(), PointF()};
                 CellDiamondPoints(renderTile.x, renderTile.y, renderTile.z, points);
                 Pen topPen(Color(135, 255, 170, 92), 1.0f);
                 graphics.DrawPolygon(&topPen, points, 4);
+                DrawTopSurfaceFidelity(graphics, renderTile.x, renderTile.y, renderTile.z);
                 DrawBlockAtmosphere(graphics, renderTile.x, renderTile.y, renderTile.z);
             }
         }
@@ -1591,6 +1657,7 @@ void DrawScene(HDC hdc) {
     DrawWeaponEffects(graphics);
     DrawWorldHaze(graphics);
     DrawSharedVignette(graphics);
+    DrawCinematicGrade(graphics);
 
     DrawHud(graphics, visibleCount);
 
