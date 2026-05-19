@@ -30,4 +30,4 @@ C++ workload installed.
 - Drag with the left mouse button to pan.
 - Use the mouse wheel to zoom, up to `5x`.
 - Press `R` for a new procedural seed.
-- Press `C` to re-center on the player.
+- Press `C` to re-frame the cube at the default zoom.

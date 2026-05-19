@@ -44,6 +44,7 @@ constexpr int kPlayers = 2;
 constexpr int kSpheresPerPlayer = 3;
 constexpr int kUrbanCell = 6;
 constexpr int kUrbanFloor = 5;
+constexpr double kDefaultZoom = 1.53;
 constexpr double kActorScale = 1.0;
 
 const wchar_t* kClassName = L"InfiniteIsoMiddleEarthWindow";
@@ -111,7 +112,7 @@ struct AppState {
     int height = 720;
     double cameraX = 0.0;
     double cameraY = 0.0;
-    double zoom = 1.0;
+    double zoom = kDefaultZoom;
     double density = 0.52;
     std::wstring seedText = L"wanderer";
     uint32_t seedHash = 0;
@@ -1123,6 +1124,42 @@ void CenterCameraOnPlayer() {
     gApp.cameraY = ((view.x + view.y) * ViewHalfH() - view.z * ViewLayerH()) * gApp.zoom;
 }
 
+void CenterCameraOnCube() {
+    double minX = 0.0;
+    double maxX = 0.0;
+    double minY = 0.0;
+    double maxY = 0.0;
+    bool first = true;
+
+    for (int x : {0, kWorldSize - 1}) {
+        for (int y : {0, kWorldSize - 1}) {
+            for (int z : {0, kWorldSize - 1}) {
+                const Vec3 view = ViewTransform(x, y, z);
+                const double px = (view.x - view.y) * kHalfW * gApp.zoom;
+                const double py = ((view.x + view.y) * ViewHalfH() - view.z * ViewLayerH()) *
+                                  gApp.zoom;
+                if (first) {
+                    minX = maxX = px;
+                    minY = maxY = py;
+                    first = false;
+                } else {
+                    minX = std::min(minX, px);
+                    maxX = std::max(maxX, px);
+                    minY = std::min(minY, py);
+                    maxY = std::max(maxY, py);
+                }
+            }
+        }
+    }
+
+    const double cubeCenterX = (minX + maxX) * 0.5;
+    const double cubeCenterY = (minY + maxY) * 0.5;
+    const double targetX = gApp.width * 0.50;
+    const double targetY = gApp.height * 0.58;
+    gApp.cameraX = gApp.width * 0.5 + cubeCenterX - targetX;
+    gApp.cameraY = gApp.height * 0.5 + cubeCenterY - targetY;
+}
+
 RectF ActorBounds(int playerIndex, int sphereIndex) {
     const Player& player = gApp.players[playerIndex][sphereIndex];
     Bitmap* image = ImageFor(L"actor", {player.sprite});
@@ -1320,9 +1357,10 @@ void RandomizeSeed() {
     gApp.activePlayer = 0;
     gApp.activeSphere = 0;
     gApp.actionsThisPlayer = 0;
+    gApp.zoom = kDefaultZoom;
     gApp.turn = 0;
     ClearSelection();
-    CenterCameraOnPlayer();
+    CenterCameraOnCube();
     InvalidateRect(gApp.hwnd, nullptr, FALSE);
 }
 
@@ -1340,12 +1378,16 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
             gApp.activePlayer = 0;
             gApp.activeSphere = 0;
             gApp.actionsThisPlayer = 0;
-            CenterCameraOnPlayer();
+            gApp.zoom = kDefaultZoom;
+            CenterCameraOnCube();
             return 0;
 
         case WM_SIZE:
             gApp.width = std::max(1, static_cast<int>(LOWORD(lParam)));
             gApp.height = std::max(1, static_cast<int>(HIWORD(lParam)));
+            if (gApp.turn == 0 && !gApp.playerSelected) {
+                CenterCameraOnCube();
+            }
             InvalidateRect(hwnd, nullptr, FALSE);
             return 0;
 
@@ -1408,8 +1450,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
             if (wParam == 'W') RotateViewUp();
             if (wParam == 'S') RotateViewDown();
             if (wParam == 'C') {
-                gApp.zoom = 1.0;
-                CenterCameraOnPlayer();
+                gApp.zoom = kDefaultZoom;
+                CenterCameraOnCube();
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
             if (wParam == 'R') RandomizeSeed();
