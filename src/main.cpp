@@ -898,8 +898,8 @@ void DrawOptionHighlight(Graphics& graphics, const MoveOption& option) {
         fill = Color(145, 255, 135, 42);
         line = Color(235, 255, 175, 70);
     } else if (option.kind == OptionKind::ArcLance) {
-        fill = Color(170, 255, 42, 64);
-        line = Color(250, 255, 110, 130);
+        fill = Color(175, 225, 35, 255);
+        line = Color(255, 255, 225, 255);
         width = 3.0f;
     } else if (option.kind == OptionKind::BreachCharge) {
         fill = Color(150, 255, 180, 54);
@@ -924,7 +924,7 @@ void DrawOptionHighlight(Graphics& graphics, const MoveOption& option) {
                                  : WorldToScreen3(ActivePlayerConst().x, ActivePlayerConst().y,
                                                   ActivePlayerConst().z);
         const PointF end = WorldToScreen3(option.x, option.y, option.z);
-        Pen beam(option.kind == OptionKind::ArcLance ? Color(180, 255, 74, 95)
+        Pen beam(option.kind == OptionKind::ArcLance ? Color(210, 255, 70, 255)
                  : option.kind == OptionKind::CommanderMove ? Color(155, 190, 115, 255)
                                                             : Color(135, 255, 180, 60),
                  option.kind == OptionKind::ArcLance ? 2.5f : 2.0f);
@@ -939,7 +939,7 @@ void DrawOptionHighlight(Graphics& graphics, const MoveOption& option) {
     if (IsForceOption(option.kind)) {
         const PointF center = WorldToScreen3(option.x, option.y, option.z);
         const float r = static_cast<float>((option.kind == OptionKind::ArcLance ? 4.5 : 3.5) * gApp.zoom);
-        SolidBrush core(option.kind == OptionKind::ArcLance ? Color(235, 255, 220, 180)
+        SolidBrush core(option.kind == OptionKind::ArcLance ? Color(245, 255, 245, 255)
                                                             : Color(210, 255, 198, 95));
         graphics.FillEllipse(&core, RectF(center.X - r, center.Y - r, r * 2.0f, r * 2.0f));
     }
@@ -1110,11 +1110,11 @@ void DrawWeaponEffects(Graphics& graphics) {
         const PointF end = WorldToScreen3(effect.x2, effect.y2, effect.z2);
 
         if (effect.kind == EffectKind::ArcLance) {
-            Pen bloom(Color(static_cast<BYTE>(110 * fade), 255, 32, 58),
+            Pen bloom(Color(static_cast<BYTE>(125 * fade), 210, 45, 255),
                       static_cast<float>((8.0 * fade + 2.0) * gApp.zoom));
-            Pen core(Color(static_cast<BYTE>(245 * fade), 255, 220, 190),
+            Pen core(Color(static_cast<BYTE>(250 * fade), 255, 250, 255),
                      static_cast<float>((2.2 * fade + 0.8) * gApp.zoom));
-            Pen hot(Color(static_cast<BYTE>(210 * fade), 255, 82, 112),
+            Pen hot(Color(static_cast<BYTE>(225 * fade), 255, 80, 245),
                     static_cast<float>((4.0 * fade + 1.0) * gApp.zoom));
             graphics.DrawLine(&bloom, start, end);
             graphics.DrawLine(&hot, start, end);
@@ -1129,10 +1129,10 @@ void DrawWeaponEffects(Graphics& graphics) {
         const float radius = static_cast<float>((effect.kind == EffectKind::ArcLance ? 14.0 : 18.0) *
                                                 (0.45 + age) * gApp.zoom);
         SolidBrush glow(effect.kind == EffectKind::ArcLance
-                            ? Color(static_cast<BYTE>(150 * fade), 255, 48, 76)
+                            ? Color(static_cast<BYTE>(165 * fade), 220, 35, 255)
                             : Color(static_cast<BYTE>(140 * fade), 255, 168, 52));
         Pen ring(effect.kind == EffectKind::ArcLance
-                     ? Color(static_cast<BYTE>(235 * fade), 255, 205, 180)
+                     ? Color(static_cast<BYTE>(245 * fade), 255, 245, 255)
                      : Color(static_cast<BYTE>(230 * fade), 255, 226, 125),
                  static_cast<float>((2.0 + 2.0 * fade) * gApp.zoom));
         graphics.FillEllipse(&glow, RectF(end.X - radius, end.Y - radius,
@@ -1233,8 +1233,8 @@ void DrawEnemyDangerZones(Graphics& graphics) {
     };
 
     const int enemy = 1 - gApp.activePlayer;
-    Pen line(Color(120, 255, 42, 66), 1.2f);
-    SolidBrush brush(Color(38, 255, 30, 52));
+    Pen line(Color(150, 92, 230, 255), 1.4f);
+    SolidBrush brush(Color(42, 20, 210, 255));
     for (int sphereIndex = 0; sphereIndex < kSpheresPerPlayer; ++sphereIndex) {
         const Player& drone = gApp.players[enemy][sphereIndex];
         if (!drone.alive) continue;
