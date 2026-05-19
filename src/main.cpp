@@ -902,50 +902,45 @@ void DrawHellscapeBackground(Graphics& graphics) {
     const float width = static_cast<float>(gApp.width);
     const float height = static_cast<float>(gApp.height);
     const RectF skyRect(0, 0, width, height);
-    LinearGradientBrush sky(skyRect, Color(255, 2, 2, 3), Color(255, 148, 28, 8),
+    LinearGradientBrush sky(skyRect, Color(255, 5, 6, 10), Color(255, 96, 20, 8),
                             Gdiplus::LinearGradientModeVertical);
     graphics.FillRectangle(&sky, skyRect);
 
-    LinearGradientBrush soot(skyRect, Color(5, 0, 0, 0), Color(210, 0, 0, 0),
+    LinearGradientBrush soot(skyRect, Color(0, 0, 0, 0), Color(150, 0, 0, 0),
                              Gdiplus::LinearGradientModeVertical);
     graphics.FillRectangle(&soot, skyRect);
 
     const float sunX = width * 0.73f;
     const float sunY = height * 0.13f;
-    const float sunR = std::min(width, height) * 0.18f;
-    SolidBrush outerFlare(Color(95, 255, 48, 10));
-    SolidBrush innerFlare(Color(150, 255, 87, 18));
-    SolidBrush darkDisk(Color(230, 8, 5, 5));
-    SolidBrush rim(Color(180, 245, 42, 8));
-    graphics.FillEllipse(&outerFlare, RectF(sunX - sunR * 2.25f, sunY - sunR * 2.25f,
-                                           sunR * 4.5f, sunR * 4.5f));
-    graphics.FillEllipse(&innerFlare, RectF(sunX - sunR * 1.18f, sunY - sunR * 1.18f,
-                                           sunR * 2.36f, sunR * 2.36f));
-    graphics.FillEllipse(&darkDisk, RectF(sunX - sunR * 0.62f, sunY - sunR * 0.62f,
-                                         sunR * 1.24f, sunR * 1.24f));
-    graphics.FillPie(&rim, RectF(sunX - sunR * 0.66f, sunY - sunR * 0.66f,
-                                sunR * 1.32f, sunR * 1.32f), 212.0f, 86.0f);
+    const float sunR = std::min(width, height) * 0.30f;
+    SolidBrush outerFlare(Color(58, 255, 72, 18));
+    SolidBrush innerFlare(Color(96, 220, 48, 12));
+    SolidBrush darkDisk(Color(210, 5, 4, 6));
+    graphics.FillEllipse(&outerFlare, RectF(sunX - sunR * 2.05f, sunY - sunR * 2.05f,
+                                           sunR * 4.10f, sunR * 4.10f));
+    graphics.FillEllipse(&innerFlare, RectF(sunX - sunR, sunY - sunR, sunR * 2.0f, sunR * 2.0f));
+    graphics.FillEllipse(&darkDisk, RectF(sunX - sunR * 0.54f, sunY - sunR * 0.54f,
+                                         sunR * 1.08f, sunR * 1.08f));
 
-    for (int i = 0; i < 26; ++i) {
+    for (int i = 0; i < 14; ++i) {
         const float y = static_cast<float>(height * (0.14 + Hash2(i, 1, 4100) * 0.55));
         const float x = static_cast<float>(Hash2(i, 2, 4101) * width);
-        const float w = static_cast<float>(width * (0.20 + Hash2(i, 3, 4102) * 0.42));
-        const float h = static_cast<float>(height * (0.035 + Hash2(i, 4, 4103) * 0.12));
-        SolidBrush smoke(Hash2(i, 5, 4104) > 0.45 ? Color(120, 24, 18, 18)
-                                                   : Color(85, 145, 34, 12));
+        const float w = static_cast<float>(width * (0.36 + Hash2(i, 3, 4102) * 0.62));
+        const float h = static_cast<float>(height * (0.065 + Hash2(i, 4, 4103) * 0.16));
+        SolidBrush smoke(Hash2(i, 5, 4104) > 0.45 ? Color(72, 24, 18, 18)
+                                                   : Color(62, 145, 34, 12));
         graphics.FillEllipse(&smoke, RectF(x - w * 0.5f, y, w, h));
     }
 
-    for (int i = 0; i < 16; ++i) {
-        const float y = static_cast<float>(height * (0.18 + i * 0.033));
-        Pen tornFire(Color(80, 230, 58, 12), static_cast<float>(1.0 + Hash2(i, 7, 4200) * 5.0));
-        graphics.DrawLine(&tornFire,
-                          PointF(-width * 0.10f, y + static_cast<float>(Hash2(i, 8, 4201) * 30.0)),
-                          PointF(width * 1.10f, y + static_cast<float>(Hash2(i, 9, 4202) * 60.0 - 30.0)));
+    for (int i = 0; i < 9; ++i) {
+        const float y = static_cast<float>(height * (0.18 + i * 0.062));
+        Pen tornFire(Color(54, 210, 52, 11), static_cast<float>(5.0 + Hash2(i, 7, 4200) * 14.0));
+        graphics.DrawLine(&tornFire, PointF(-width * 0.10f, y),
+                          PointF(width * 1.10f, y + static_cast<float>(Hash2(i, 9, 4202) * 34.0 - 17.0)));
     }
 
-    SolidBrush ridgeBack(Color(150, 7, 6, 6));
-    SolidBrush ridgeFront(Color(235, 1, 1, 2));
+    SolidBrush ridgeBack(Color(95, 7, 6, 6));
+    SolidBrush ridgeFront(Color(165, 1, 1, 2));
     PointF backRidge[18] = {};
     PointF frontRidge[18] = {};
     for (int i = 0; i < 18; ++i) {
@@ -964,16 +959,19 @@ void DrawHellscapeBackground(Graphics& graphics) {
     graphics.FillPolygon(&ridgeBack, backPoly, 20);
     graphics.FillPolygon(&ridgeFront, frontPoly, 20);
 
-    for (int i = 0; i < 110; ++i) {
+    for (int i = 0; i < 42; ++i) {
         const float x = static_cast<float>(Hash2(i, 2, 4500) * width);
         const float y = static_cast<float>(Hash2(i, 3, 4501) * height * 0.72);
-        const float size = static_cast<float>(1.0 + Hash2(i, 4, 4502) * 2.8);
+        const float size = static_cast<float>(0.8 + Hash2(i, 4, 4502) * 1.9);
         const bool star = Hash2(i, 5, 4503) > 0.55;
-        SolidBrush point(star ? Color(190, 190, 210, 240) : Color(150, 255, 80, 22));
+        SolidBrush point(star ? Color(95, 190, 210, 240) : Color(80, 255, 80, 22));
         graphics.FillEllipse(&point, RectF(x, y, size, size));
     }
 
-    SolidBrush vignette(Color(90, 0, 0, 0));
+    SolidBrush defocus(Color(58, 18, 5, 7));
+    graphics.FillRectangle(&defocus, skyRect);
+
+    SolidBrush vignette(Color(72, 0, 0, 0));
     graphics.FillRectangle(&vignette, RectF(0, 0, width, height * 0.06f));
     graphics.FillRectangle(&vignette, RectF(0, 0, width * 0.04f, height));
     graphics.FillRectangle(&vignette, RectF(width * 0.96f, 0, width * 0.04f, height));
