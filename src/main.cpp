@@ -126,6 +126,11 @@ struct WeaponEffect {
     uint64_t duration = 360;
 };
 
+struct CombatLogEntry {
+    std::wstring text;
+    uint64_t time = 0;
+};
+
 struct Player {
     int x = 0;
     int y = 0;
@@ -174,6 +179,10 @@ struct AppState {
     bool controllerSelected = false;
     std::vector<MoveOption> moveOptions;
     std::vector<WeaponEffect> weaponEffects;
+    std::vector<CombatLogEntry> combatLog;
+    std::wstring actionNotice;
+    uint64_t actionNoticeTime = 0;
+    uint64_t actionNoticeDuration = 1500;
     std::unique_ptr<Bitmap> skyCache;
     int skyCacheW = 0;
     int skyCacheH = 0;
@@ -214,10 +223,36 @@ void SetActiveSphere(int sphereIndex) {
     gApp.activeSphere = sphereIndex;
 }
 
+std::wstring PlayerLabel(int playerIndex);
+void AnnounceAction(const std::wstring& text, uint64_t duration = 1500);
+
 void SetWinner(int playerIndex, const std::wstring& reason) {
     if (gApp.winner >= 0) return;
     gApp.winner = playerIndex;
     gApp.winReason = reason;
+    wchar_t message[160] = {};
+    swprintf_s(message, L"%s wins: %s", PlayerLabel(playerIndex).c_str(), reason.c_str());
+    AnnounceAction(message, 3000);
+}
+
+void PushCombatLog(const std::wstring& text) {
+    gApp.combatLog.push_back({text, GetTickCount64()});
+    if (gApp.combatLog.size() > 5) {
+        gApp.combatLog.erase(gApp.combatLog.begin());
+    }
+}
+
+void AnnounceAction(const std::wstring& text, uint64_t duration) {
+    gApp.actionNotice = text;
+    gApp.actionNoticeTime = GetTickCount64();
+    gApp.actionNoticeDuration = duration;
+    PushCombatLog(text);
+}
+
+std::wstring PlayerLabel(int playerIndex) {
+    wchar_t buffer[16] = {};
+    swprintf_s(buffer, L"P%d", playerIndex + 1);
+    return buffer;
 }
 
 std::wstring ExeDirectory() {
@@ -1120,15 +1155,31 @@ void DrawPlayerSphere(Graphics& graphics, int playerIndex, int sphereIndex) {
                              NaturalSolidBlockAt(player.x, player.y, player.z);
 
     const bool activeSphere = playerIndex == gApp.activePlayer && sphereIndex == gApp.activeSphere;
+    const bool selectedSphere = activeSphere && gApp.playerSelected && !gApp.controllerSelected;
     if (underground || activeSphere) {
+        const double pulse = 0.5 + 0.5 * std::sin(GetTickCount64() * 0.010);
         RectF halo(bounds.X - 4.0f * static_cast<float>(gApp.zoom),
                    bounds.Y - 4.0f * static_cast<float>(gApp.zoom),
                    bounds.Width + 8.0f * static_cast<float>(gApp.zoom),
                    bounds.Height + 8.0f * static_cast<float>(gApp.zoom));
-        SolidBrush glow(activeSphere ? Color(120, 250, 230, 120) : Color(90, 85, 180, 255));
-        Pen ring(playerIndex == 0 ? Color(235, 170, 220, 255) : Color(235, 255, 150, 150), 2.0f);
+        if (selectedSphere) {
+            halo.X -= static_cast<float>(pulse * 3.0 * gApp.zoom);
+            halo.Y -= static_cast<float>(pulse * 3.0 * gApp.zoom);
+            halo.Width += static_cast<float>(pulse * 6.0 * gApp.zoom);
+            halo.Height += static_cast<float>(pulse * 6.0 * gApp.zoom);
+        }
+        SolidBrush glow(selectedSphere ? Color(static_cast<BYTE>(120 + pulse * 70), 250, 230, 120)
+                                       : activeSphere ? Color(120, 250, 230, 120)
+                                                      : Color(90, 85, 180, 255));
+        Pen ring(playerIndex == 0 ? Color(235, 170, 220, 255) : Color(235, 255, 150, 150),
+                 selectedSphere ? 3.2f : 2.0f);
         graphics.FillEllipse(&glow, halo);
         graphics.DrawEllipse(&ring, halo);
+        if (selectedSphere) {
+            Pen beam(Color(static_cast<BYTE>(70 + pulse * 70), 255, 220, 150), 1.4f);
+            const PointF top(pos.X, bounds.Y - static_cast<float>((10.0 + pulse * 10.0) * gApp.zoom));
+            graphics.DrawLine(&beam, PointF(pos.X, bounds.Y), top);
+        }
     }
 
     if (image) {
@@ -1146,9 +1197,11 @@ void DrawControllerCore(Graphics& graphics, int playerIndex) {
     const bool blue = playerIndex == 0;
     const bool selected = gApp.controllerSelected && playerIndex == gApp.activePlayer;
     const bool revealed = ControllerRevealed(playerIndex);
+    const double pulse = selected ? 0.5 + 0.5 * std::sin(GetTickCount64() * 0.010) : 0.0;
     SolidBrush footprint(blue ? Color(revealed ? 170 : 105, 20, 70, 120)
                               : Color(revealed ? 170 : 105, 120, 18, 28));
-    Pen outer(blue ? Color(245, 105, 205, 255) : Color(245, 255, 95, 95), selected ? 4.0f : 2.8f);
+    Pen outer(blue ? Color(245, 105, 205, 255) : Color(245, 255, 95, 95),
+              selected ? static_cast<float>(3.4 + pulse * 2.0) : 2.8f);
     Pen inner(Color(235, 255, 222, 130), 1.4f);
     graphics.FillPolygon(&footprint, points, 4);
     graphics.DrawPolygon(&outer, points, 4);
@@ -1162,6 +1215,46 @@ void DrawControllerCore(Graphics& graphics, int playerIndex) {
     graphics.FillEllipse(&hot, RectF(center.X - r * 0.42f, center.Y - r * 0.56f,
                                      r * 0.84f, r * 0.84f));
     graphics.DrawEllipse(&inner, RectF(center.X - r, center.Y - r * 1.15f, r * 2.0f, r * 2.0f));
+    if (selected) {
+        const float pulseR = static_cast<float>((11.0 + pulse * 8.0) * gApp.zoom);
+        Pen signal(Color(static_cast<BYTE>(150 + pulse * 80), 255, 210, 160), 1.8f);
+        graphics.DrawEllipse(&signal, RectF(center.X - pulseR, center.Y - pulseR * 1.15f,
+                                            pulseR * 2.0f, pulseR * 2.0f));
+    }
+}
+
+void DrawEnemyDangerZones(Graphics& graphics) {
+    const struct Direction {
+        int dx;
+        int dy;
+        int dz;
+    } directions[] = {
+        {0, -1, 0}, {1, 0, 0}, {0, 1, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1},
+    };
+
+    const int enemy = 1 - gApp.activePlayer;
+    Pen line(Color(120, 255, 42, 66), 1.2f);
+    SolidBrush brush(Color(38, 255, 30, 52));
+    for (int sphereIndex = 0; sphereIndex < kSpheresPerPlayer; ++sphereIndex) {
+        const Player& drone = gApp.players[enemy][sphereIndex];
+        if (!drone.alive) continue;
+        for (const Direction& direction : directions) {
+            for (int distance = 1; distance <= kArcLanceRange; ++distance) {
+                const int x = drone.x + direction.dx * distance;
+                const int y = drone.y + direction.dy * distance;
+                const int z = drone.z + direction.dz * distance;
+                if (!IsPlayableCell(x, y, z) || SolidBlockAt(x, y, z)) break;
+                PointF points[4] = {PointF(), PointF(), PointF(), PointF()};
+                CellDiamondPoints(x, y, z, points);
+                graphics.FillPolygon(&brush, points, 4);
+                if (distance == kArcLanceRange || !IsPlayableCell(x + direction.dx, y + direction.dy,
+                                                                   z + direction.dz) ||
+                    SolidBlockAt(x + direction.dx, y + direction.dy, z + direction.dz)) {
+                    graphics.DrawPolygon(&line, points, 4);
+                }
+            }
+        }
+    }
 }
 
 void DrawHud(Graphics& graphics, int visibleCount) {
@@ -1188,11 +1281,34 @@ void DrawHud(Graphics& graphics, int visibleCount) {
                gApp.controllerSelected ? controller.z : player.z,
                visibleCount, gApp.zoom);
     graphics.DrawString(stats, -1, &hudFont, PointF(34, 32), &muted);
+    const uint64_t now = GetTickCount64();
+    if (!gApp.actionNotice.empty() && now - gApp.actionNoticeTime < gApp.actionNoticeDuration) {
+        const double fade = 1.0 - static_cast<double>(now - gApp.actionNoticeTime) /
+                                      static_cast<double>(std::max<uint64_t>(1, gApp.actionNoticeDuration));
+        Font noticeFont(&sans, 20.0f, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+        SolidBrush noticeBrush(Color(static_cast<BYTE>(120 + fade * 120), 255, 205, 120));
+        graphics.DrawString(gApp.actionNotice.c_str(), -1, &noticeFont,
+                            PointF(34, 72), &noticeBrush);
+    }
     if (gApp.winner >= 0) {
         wchar_t winText[192] = {};
         swprintf_s(winText, L"P%d wins: %s", gApp.winner + 1, gApp.winReason.c_str());
         graphics.DrawString(winText, -1, &hudFont, PointF(static_cast<float>(gApp.width) * 0.50f, 32),
                             &hot);
+    }
+
+    SolidBrush logPanel(Color(150, 8, 10, 12));
+    const float logW = 390.0f;
+    const float logX = static_cast<float>(gApp.width) - logW - 18.0f;
+    const float logY = static_cast<float>(gApp.height) - 138.0f;
+    graphics.FillRectangle(&logPanel, RectF(logX, logY, logW, 88.0f));
+    const int logCount = static_cast<int>(gApp.combatLog.size());
+    for (int i = 0; i < logCount; ++i) {
+        const int index = logCount - 1 - i;
+        const BYTE alpha = static_cast<BYTE>(220 - i * 34);
+        SolidBrush logText(Color(alpha, 215, 198, 168));
+        graphics.DrawString(gApp.combatLog[index].text.c_str(), -1, &hudFont,
+                            PointF(logX + 14.0f, logY + 12.0f + i * 16.0f), &logText);
     }
 
     graphics.FillRectangle(&panel, RectF(18, static_cast<float>(gApp.height - 64), 520, 46));
@@ -1453,6 +1569,8 @@ void DrawScene(HDC hdc) {
         DrawControllerCore(graphics, playerIndex);
     }
 
+    DrawEnemyDangerZones(graphics);
+
     if (gApp.playerSelected) {
         for (const MoveOption& option : gApp.moveOptions) {
             DrawOptionHighlight(graphics, option);
@@ -1697,12 +1815,21 @@ bool DamageEnemyAt(int x, int y, int z) {
     int sphereIndex = -1;
     if (OccupyingSphereAt(x, y, z, &sphereOwner, &sphereIndex) && sphereOwner != gApp.activePlayer) {
         gApp.players[sphereOwner][sphereIndex].alive = false;
+        wchar_t message[128] = {};
+        swprintf_s(message, L"%s destroyed %s drone %d",
+                   PlayerLabel(gApp.activePlayer).c_str(), PlayerLabel(sphereOwner).c_str(),
+                   sphereIndex + 1);
+        AnnounceAction(message);
         return true;
     }
 
     int controllerOwner = -1;
     if (AnyControllerAt(x, y, z, &controllerOwner) && controllerOwner != gApp.activePlayer) {
         gApp.controllers[controllerOwner].alive = false;
+        wchar_t message[128] = {};
+        swprintf_s(message, L"%s destroyed %s commander",
+                   PlayerLabel(gApp.activePlayer).c_str(), PlayerLabel(controllerOwner).c_str());
+        AnnounceAction(message, 2100);
         return true;
     }
     return false;
@@ -1712,6 +1839,9 @@ bool FireArcLance(const MoveOption& option) {
     if (gApp.winner >= 0) return false;
     ActivePlayer().facing = option.facing;
     const Player& shooter = ActivePlayerConst();
+    wchar_t message[128] = {};
+    swprintf_s(message, L"%s arc-lance fired", PlayerLabel(gApp.activePlayer).c_str());
+    AnnounceAction(message, 1100);
     if (!DamageEnemyAt(option.x, option.y, option.z)) return false;
     AddWeaponEffect(EffectKind::ArcLance, shooter.x, shooter.y, shooter.z,
                     option.x, option.y, option.z, 520);
@@ -1740,6 +1870,10 @@ bool DetonateBreachCharge(const MoveOption& option) {
         changed = true;
     }
 
+    wchar_t message[128] = {};
+    swprintf_s(message, L"%s breach charge opened %s",
+               PlayerLabel(gApp.activePlayer).c_str(), changed ? L"2-cell tunnel" : L"impact pocket");
+    AnnounceAction(message, 1300);
     DamageEnemyAt(firstX, firstY, firstZ);
     DamageEnemyAt(option.x, option.y, option.z);
     AddWeaponEffect(EffectKind::BreachCharge, player.x, player.y, player.z,
@@ -1756,12 +1890,20 @@ void EndTurn() {
         ClearSelection();
         return;
     }
+    const int endingPlayer = gApp.activePlayer;
     ++gApp.turn;
     ++gApp.actionsThisPlayer;
     if (gApp.actionsThisPlayer >= 2) {
         gApp.actionsThisPlayer = 0;
         gApp.activePlayer = 1 - gApp.activePlayer;
         gApp.activeSphere = FirstLivingSphere(gApp.activePlayer);
+        wchar_t message[128] = {};
+        swprintf_s(message, L"%s turn: action 1/2", PlayerLabel(gApp.activePlayer).c_str());
+        PushCombatLog(message);
+    } else {
+        wchar_t message[128] = {};
+        swprintf_s(message, L"%s action 2/2", PlayerLabel(endingPlayer).c_str());
+        PushCombatLog(message);
     }
     ClearSelection();
     CenterCameraOnPlayer();
@@ -1776,6 +1918,9 @@ void EndEntirePlayerTurn() {
     gApp.actionsThisPlayer = 0;
     gApp.activePlayer = 1 - gApp.activePlayer;
     gApp.activeSphere = FirstLivingSphere(gApp.activePlayer);
+    wchar_t message[128] = {};
+    swprintf_s(message, L"%s turn: action 1/2", PlayerLabel(gApp.activePlayer).c_str());
+    PushCombatLog(message);
     ClearSelection();
     CenterCameraOnPlayer();
 }
@@ -1795,6 +1940,9 @@ bool MoveCommander(const MoveOption& option) {
     controller.x = option.x;
     controller.y = option.y;
     controller.z = option.z;
+    wchar_t message[128] = {};
+    swprintf_s(message, L"%s commander moved: turn ends", PlayerLabel(gApp.activePlayer).c_str());
+    AnnounceAction(message, 1500);
     CheckVictory();
     EndEntirePlayerTurn();
     InvalidateRect(gApp.hwnd, nullptr, FALSE);
@@ -1820,6 +1968,13 @@ bool EnterOrDig(int x, int y, int z, bool spendTurn) {
 
     if (SolidBlockAt(x, y, z)) {
         RemoveBlockAt(x, y, z);
+        wchar_t message[128] = {};
+        swprintf_s(message, L"%s tunnelled one block", PlayerLabel(gApp.activePlayer).c_str());
+        AnnounceAction(message, 1000);
+    } else {
+        wchar_t message[128] = {};
+        swprintf_s(message, L"%s drone moved", PlayerLabel(gApp.activePlayer).c_str());
+        AnnounceAction(message, 850);
     }
 
     Player& player = ActivePlayer();
@@ -1985,6 +2140,9 @@ void ResetMatchPieces() {
     gApp.turn = 0;
     gApp.winner = -1;
     gApp.winReason.clear();
+    gApp.actionNotice.clear();
+    gApp.combatLog.clear();
+    gApp.weaponEffects.clear();
     ClearSelection();
 }
 
@@ -2113,7 +2271,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
         }
 
         case WM_TIMER:
-            if (UpdateCameraEase() || !gApp.weaponEffects.empty()) {
+            if (UpdateCameraEase() || !gApp.weaponEffects.empty() || gApp.playerSelected ||
+                (!gApp.actionNotice.empty() &&
+                 GetTickCount64() - gApp.actionNoticeTime < gApp.actionNoticeDuration)) {
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
             return 0;
