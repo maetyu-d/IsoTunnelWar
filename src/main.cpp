@@ -1514,13 +1514,14 @@ void CenterCameraOnCube(bool immediate = false) {
 bool UpdateCameraEase() {
     const double dx = gApp.targetCameraX - gApp.cameraX;
     const double dy = gApp.targetCameraY - gApp.cameraY;
-    if (std::abs(dx) < 0.08 && std::abs(dy) < 0.08) {
+    const double distance = std::sqrt(dx * dx + dy * dy);
+    if (distance < 1.25) {
         gApp.cameraX = gApp.targetCameraX;
         gApp.cameraY = gApp.targetCameraY;
-        return !gApp.weaponEffects.empty();
+        return false;
     }
 
-    const double ease = 0.115;
+    const double ease = 0.34;
     gApp.cameraX += dx * ease;
     gApp.cameraY += dy * ease;
     return true;
