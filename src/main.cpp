@@ -96,6 +96,7 @@ struct MoveOption {
     int dy = 0;
     int dz = 0;
     bool tunnel = false;
+    bool attack = false;
     std::wstring facing = L"S";
 };
 
@@ -106,6 +107,13 @@ struct Player {
     bool alive = true;
     std::wstring facing = L"S";
     std::wstring sprite = L"sphere-blue";
+};
+
+struct DroneController {
+    int x = 0;
+    int y = 0;
+    int z = 0;
+    bool alive = true;
 };
 
 struct AppState {
@@ -128,6 +136,9 @@ struct AppState {
     int activeSphere = 0;
     int actionsThisPlayer = 0;
     Player players[kPlayers][kSpheresPerPlayer];
+    DroneController controllers[kPlayers];
+    int winner = -1;
+    std::wstring winReason;
     int view[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
     int viewTurns = 0;
     bool playerSelected = false;
@@ -155,10 +166,24 @@ int FirstLivingSphere(int playerIndex) {
     return 0;
 }
 
+int LivingSphereCount(int playerIndex) {
+    int count = 0;
+    for (int i = 0; i < kSpheresPerPlayer; ++i) {
+        if (gApp.players[playerIndex][i].alive) ++count;
+    }
+    return count;
+}
+
 void SetActiveSphere(int sphereIndex) {
     if (sphereIndex < 0 || sphereIndex >= kSpheresPerPlayer) return;
     if (!gApp.players[gApp.activePlayer][sphereIndex].alive) return;
     gApp.activeSphere = sphereIndex;
+}
+
+void SetWinner(int playerIndex, const std::wstring& reason) {
+    if (gApp.winner >= 0) return;
+    gApp.winner = playerIndex;
+    gApp.winReason = reason;
 }
 
 std::wstring ExeDirectory() {
@@ -402,6 +427,60 @@ bool DugCellAt(int x, int y, int z) {
 int TunnelOwnerAt(int x, int y, int z) {
     const auto it = gApp.tunnelOwners.find(BlockKey(x, y, z));
     return it == gApp.tunnelOwners.end() ? -1 : it->second;
+}
+
+bool ControllerAt(int playerIndex, int x, int y, int z) {
+    if (playerIndex < 0 || playerIndex >= kPlayers) return false;
+    const DroneController& controller = gApp.controllers[playerIndex];
+    return controller.alive && controller.x == x && controller.y == y && controller.z == z;
+}
+
+bool AnyControllerAt(int x, int y, int z, int* owner = nullptr) {
+    for (int playerIndex = 0; playerIndex < kPlayers; ++playerIndex) {
+        if (ControllerAt(playerIndex, x, y, z)) {
+            if (owner) *owner = playerIndex;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool OccupyingSphereAt(int x, int y, int z, int* owner = nullptr, int* sphere = nullptr) {
+    for (int playerIndex = 0; playerIndex < kPlayers; ++playerIndex) {
+        for (int sphereIndex = 0; sphereIndex < kSpheresPerPlayer; ++sphereIndex) {
+            const Player& player = gApp.players[playerIndex][sphereIndex];
+            if (!player.alive) continue;
+            if (player.x == x && player.y == y && player.z == z) {
+                if (owner) *owner = playerIndex;
+                if (sphere) *sphere = sphereIndex;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool ControllerRevealed(int playerIndex) {
+    if (playerIndex < 0 || playerIndex >= kPlayers || !gApp.controllers[playerIndex].alive) return false;
+    const DroneController& controller = gApp.controllers[playerIndex];
+    if (!SolidBlockAt(controller.x, controller.y, controller.z)) return true;
+
+    const struct Direction {
+        int dx;
+        int dy;
+        int dz;
+    } directions[] = {
+        {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1},
+    };
+    for (const Direction& direction : directions) {
+        if (InWorldCube(controller.x + direction.dx, controller.y + direction.dy,
+                        controller.z + direction.dz) &&
+            !SolidBlockAt(controller.x + direction.dx, controller.y + direction.dy,
+                          controller.z + direction.dz)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool ExposedBlockAt(int x, int y, int z) {
@@ -734,8 +813,9 @@ void DrawOptionHighlight(Graphics& graphics, const MoveOption& option) {
     };
     CellDiamondPoints(option.x, option.y, option.z, points);
 
-    const Color fill = option.tunnel ? Color(145, 255, 135, 42) : Color(125, 80, 220, 120);
-    const Color line = option.tunnel ? Color(235, 255, 175, 70) : Color(225, 120, 255, 180);
+    const bool force = option.tunnel || option.attack;
+    const Color fill = force ? Color(155, 255, 128, 38) : Color(125, 80, 220, 120);
+    const Color line = force ? Color(240, 255, 178, 66) : Color(225, 120, 255, 180);
     SolidBrush brush(fill);
     Pen pen(line, 2.0f);
     graphics.FillPolygon(&brush, points, 4);
@@ -891,9 +971,34 @@ void DrawPlayerSphere(Graphics& graphics, int playerIndex, int sphereIndex) {
     }
 }
 
+void DrawControllerCore(Graphics& graphics, int playerIndex) {
+    if (!ControllerRevealed(playerIndex)) return;
+
+    const DroneController& controller = gApp.controllers[playerIndex];
+    PointF points[4] = {PointF(), PointF(), PointF(), PointF()};
+    CellDiamondPoints(controller.x, controller.y, controller.z, points);
+
+    const bool blue = playerIndex == 0;
+    SolidBrush footprint(blue ? Color(160, 20, 70, 120) : Color(160, 120, 18, 28));
+    Pen outer(blue ? Color(245, 105, 205, 255) : Color(245, 255, 95, 95), 2.8f);
+    Pen inner(Color(235, 255, 222, 130), 1.4f);
+    graphics.FillPolygon(&footprint, points, 4);
+    graphics.DrawPolygon(&outer, points, 4);
+
+    const PointF center = WorldToScreen3(controller.x, controller.y, controller.z);
+    const float r = static_cast<float>(7.0 * gApp.zoom);
+    SolidBrush glow(blue ? Color(190, 90, 190, 255) : Color(190, 255, 80, 80));
+    SolidBrush hot(Color(235, 255, 220, 125));
+    graphics.FillEllipse(&glow, RectF(center.X - r, center.Y - r * 1.15f, r * 2.0f, r * 2.0f));
+    graphics.FillEllipse(&hot, RectF(center.X - r * 0.42f, center.Y - r * 0.56f,
+                                     r * 0.84f, r * 0.84f));
+    graphics.DrawEllipse(&inner, RectF(center.X - r, center.Y - r * 1.15f, r * 2.0f, r * 2.0f));
+}
+
 void DrawHud(Graphics& graphics, int visibleCount) {
     SolidBrush panel(Color(210, 12, 18, 16));
     SolidBrush muted(Color(185, 194, 171));
+    SolidBrush hot(Color(230, 255, 190, 110));
     FontFamily sans(L"Segoe UI");
     Font hudFont(&sans, 13.0f, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
 
@@ -901,16 +1006,24 @@ void DrawHud(Graphics& graphics, int visibleCount) {
 
     wchar_t stats[256] = {};
     const Player& player = ActivePlayerConst();
-    swprintf_s(stats, L"cube: %dx%dx%d    turn: %d    active: P%d.%d action:%d/2    sphere: %d,%d,%d    90deg turns:%d    dug: %zu    visible: %d    zoom: %.2fx",
+    swprintf_s(stats, L"cube: %dx%dx%d    turn: %d    active: P%d.%d action:%d/2    drones: %d-%d    ctrl: %c/%c    sphere: %d,%d,%d    visible: %d    zoom: %.2fx",
                kWorldSize, kWorldSize, kWorldSize,
                gApp.turn, gApp.activePlayer + 1, gApp.activeSphere + 1, gApp.actionsThisPlayer + 1,
+               LivingSphereCount(0), LivingSphereCount(1),
+               gApp.controllers[0].alive ? L'A' : L'X',
+               gApp.controllers[1].alive ? L'A' : L'X',
                player.x, player.y, player.z,
-               PositiveMod(gApp.viewTurns, 24),
-               gApp.removedBlocks.size(), visibleCount, gApp.zoom);
+               visibleCount, gApp.zoom);
     graphics.DrawString(stats, -1, &hudFont, PointF(34, 32), &muted);
+    if (gApp.winner >= 0) {
+        wchar_t winText[192] = {};
+        swprintf_s(winText, L"P%d wins: %s", gApp.winner + 1, gApp.winReason.c_str());
+        graphics.DrawString(winText, -1, &hudFont, PointF(static_cast<float>(gApp.width) * 0.50f, 32),
+                            &hot);
+    }
 
     graphics.FillRectangle(&panel, RectF(18, static_cast<float>(gApp.height - 64), 520, 46));
-    graphics.DrawString(L"Click any active-side sphere | Green move | Orange tunnel | WASD rotate 90 degrees | Drag pan",
+    graphics.DrawString(L"Click drone | Green move | Orange tunnel/attack | Find and kill the buried controller",
                         -1, &hudFont, PointF(34, static_cast<float>(gApp.height - 50)), &muted);
 }
 
@@ -1106,6 +1219,9 @@ void DrawScene(HDC hdc) {
         DrawTunnelCell(graphics, cell.x, cell.y, cell.z,
                        cell.x == active.x && cell.y == active.y && cell.z == active.z);
     }
+    for (int playerIndex = 0; playerIndex < kPlayers; ++playerIndex) {
+        DrawControllerCore(graphics, playerIndex);
+    }
 
     if (gApp.playerSelected) {
         for (const MoveOption& option : gApp.moveOptions) {
@@ -1189,6 +1305,7 @@ bool PointInRect(const RectF& rect, int x, int y) {
 
 void BuildMoveOptions() {
     gApp.moveOptions.clear();
+    if (gApp.winner >= 0) return;
     const Player& player = ActivePlayerConst();
     const struct Direction {
         int dx;
@@ -1212,10 +1329,21 @@ void BuildMoveOptions() {
             if (!IsPlayableCell(x, y, z)) break;
 
             const bool tunnel = SolidBlockAt(x, y, z);
+            int sphereOwner = -1;
+            int sphereIndex = -1;
+            const bool occupied = OccupyingSphereAt(x, y, z, &sphereOwner, &sphereIndex);
+            if (occupied && sphereOwner == gApp.activePlayer) break;
+
+            int controllerOwner = -1;
+            const bool controller = AnyControllerAt(x, y, z, &controllerOwner);
+            if (controller && controllerOwner == gApp.activePlayer) break;
+
             if (tunnel && distance > 1) break;
+            const bool attack = (occupied && sphereOwner != gApp.activePlayer) ||
+                                (controller && controllerOwner != gApp.activePlayer);
             gApp.moveOptions.push_back(
-                {x, y, z, direction.dx, direction.dy, direction.dz, tunnel, direction.facing});
-            if (tunnel) break;
+                {x, y, z, direction.dx, direction.dy, direction.dz, tunnel, attack, direction.facing});
+            if (tunnel || occupied || controller) break;
         }
     }
 }
@@ -1231,7 +1359,26 @@ void ClearSelection() {
     gApp.moveOptions.clear();
 }
 
+void CheckVictory() {
+    if (gApp.winner >= 0) return;
+    for (int playerIndex = 0; playerIndex < kPlayers; ++playerIndex) {
+        const int opponent = 1 - playerIndex;
+        if (!gApp.controllers[playerIndex].alive) {
+            SetWinner(opponent, L"enemy controller destroyed");
+            return;
+        }
+        if (LivingSphereCount(playerIndex) == 0) {
+            SetWinner(opponent, L"all enemy drones destroyed");
+            return;
+        }
+    }
+}
+
 void EndTurn() {
+    if (gApp.winner >= 0) {
+        ClearSelection();
+        return;
+    }
     ++gApp.turn;
     ++gApp.actionsThisPlayer;
     if (gApp.actionsThisPlayer >= 2) {
@@ -1244,7 +1391,21 @@ void EndTurn() {
 }
 
 bool EnterOrDig(int x, int y, int z, bool spendTurn) {
+    if (gApp.winner >= 0) return false;
     if (!IsPlayableCell(x, y, z)) return false;
+
+    int sphereOwner = -1;
+    int sphereIndex = -1;
+    if (OccupyingSphereAt(x, y, z, &sphereOwner, &sphereIndex)) {
+        if (sphereOwner == gApp.activePlayer) return false;
+        gApp.players[sphereOwner][sphereIndex].alive = false;
+    }
+
+    int controllerOwner = -1;
+    if (AnyControllerAt(x, y, z, &controllerOwner)) {
+        if (controllerOwner == gApp.activePlayer) return false;
+        gApp.controllers[controllerOwner].alive = false;
+    }
 
     if (SolidBlockAt(x, y, z)) {
         RemoveBlockAt(x, y, z);
@@ -1255,6 +1416,7 @@ bool EnterOrDig(int x, int y, int z, bool spendTurn) {
     player.y = y;
     player.z = z;
     if (spendTurn) {
+        CheckVictory();
         EndTurn();
     } else {
         ClearSelection();
@@ -1322,6 +1484,7 @@ void RotateViewDown() {
 }
 
 void HandleLeftClick(int screenX, int screenY) {
+    if (gApp.winner >= 0) return;
     if (gApp.playerSelected && TryExecuteClickedOption(screenX, screenY)) return;
 
     for (int sphereIndex = kSpheresPerPlayer - 1; sphereIndex >= 0; --sphereIndex) {
@@ -1354,14 +1517,33 @@ Player MakeSphere(int side, int index, int x, int y, int z) {
     return {x, y, z, true, L"S", side == 0 ? L"sphere-blue" : L"sphere-red"};
 }
 
-void RandomizeSeed() {
-    std::mt19937 rng(static_cast<uint32_t>(GetTickCount64()));
-    wchar_t buffer[32] = {};
-    swprintf_s(buffer, L"seed-%08x", rng());
-    gApp.seedText = buffer;
-    gApp.seedHash = HashString(gApp.seedText);
+DroneController MakeController(int side) {
+    const int baseX = side == 0 ? 7 : kWorldSize - 8;
+    const int baseY = side == 0 ? kWorldSize / 2 - 2 : kWorldSize / 2 + 2;
+    const int baseZ = 7;
+    for (int radius = 0; radius < 10; ++radius) {
+        for (int dz = -radius; dz <= radius; ++dz) {
+            for (int dx = -radius; dx <= radius; ++dx) {
+                for (int dy = -radius; dy <= radius; ++dy) {
+                    if (std::abs(dx) + std::abs(dy) + std::abs(dz) > radius) continue;
+                    const int x = baseX + dx;
+                    const int y = baseY + dy;
+                    const int z = baseZ + dz;
+                    if (!InWorldCube(x, y, z)) continue;
+                    if (!NaturalSolidBlockAt(x, y, z)) continue;
+                    return {x, y, z, true};
+                }
+            }
+        }
+    }
+    return {baseX, baseY, baseZ, true};
+}
+
+void ResetMatchPieces() {
     gApp.removedBlocks.clear();
     gApp.tunnelOwners.clear();
+    gApp.controllers[0] = MakeController(0);
+    gApp.controllers[1] = MakeController(1);
     for (int i = 0; i < kSpheresPerPlayer; ++i) {
         const int offsetY = i - 1;
         gApp.players[0][i] = MakeSphere(0, i, 5, kWorldSize / 2 + offsetY * 2, 12);
@@ -1370,9 +1552,20 @@ void RandomizeSeed() {
     gApp.activePlayer = 0;
     gApp.activeSphere = 0;
     gApp.actionsThisPlayer = 0;
-    gApp.zoom = kDefaultZoom;
     gApp.turn = 0;
+    gApp.winner = -1;
+    gApp.winReason.clear();
     ClearSelection();
+}
+
+void RandomizeSeed() {
+    std::mt19937 rng(static_cast<uint32_t>(GetTickCount64()));
+    wchar_t buffer[32] = {};
+    swprintf_s(buffer, L"seed-%08x", rng());
+    gApp.seedText = buffer;
+    gApp.seedHash = HashString(gApp.seedText);
+    ResetMatchPieces();
+    gApp.zoom = kDefaultZoom;
     CenterCameraOnCube();
     InvalidateRect(gApp.hwnd, nullptr, FALSE);
 }
@@ -1383,14 +1576,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
             gApp.hwnd = hwnd;
             gApp.seedHash = HashString(gApp.seedText);
             LoadImages();
-            for (int i = 0; i < kSpheresPerPlayer; ++i) {
-                const int offsetY = i - 1;
-                gApp.players[0][i] = MakeSphere(0, i, 5, kWorldSize / 2 + offsetY * 2, 12);
-                gApp.players[1][i] = MakeSphere(1, i, kWorldSize - 6, kWorldSize / 2 + offsetY * 2, 12);
-            }
-            gApp.activePlayer = 0;
-            gApp.activeSphere = 0;
-            gApp.actionsThisPlayer = 0;
+            ResetMatchPieces();
             gApp.zoom = kDefaultZoom;
             CenterCameraOnCube();
             return 0;
