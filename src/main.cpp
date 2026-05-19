@@ -1346,18 +1346,20 @@ void DrawHud(Graphics& graphics, int visibleCount) {
                             &hot);
     }
 
-    SolidBrush logPanel(Color(150, 8, 10, 12));
-    const float logW = 390.0f;
-    const float logX = static_cast<float>(gApp.width) - logW - 18.0f;
-    const float logY = static_cast<float>(gApp.height) - 138.0f;
-    graphics.FillRectangle(&logPanel, RectF(logX, logY, logW, 88.0f));
     const int logCount = static_cast<int>(gApp.combatLog.size());
-    for (int i = 0; i < logCount; ++i) {
-        const int index = logCount - 1 - i;
-        const BYTE alpha = static_cast<BYTE>(220 - i * 34);
-        SolidBrush logText(Color(alpha, 215, 198, 168));
-        graphics.DrawString(gApp.combatLog[index].text.c_str(), -1, &hudFont,
-                            PointF(logX + 14.0f, logY + 12.0f + i * 16.0f), &logText);
+    if (logCount > 0) {
+        SolidBrush logPanel(Color(150, 8, 10, 12));
+        const float logW = 390.0f;
+        const float logX = static_cast<float>(gApp.width) - logW - 18.0f;
+        const float logY = static_cast<float>(gApp.height) - 138.0f;
+        graphics.FillRectangle(&logPanel, RectF(logX, logY, logW, 88.0f));
+        for (int i = 0; i < logCount; ++i) {
+            const int index = logCount - 1 - i;
+            const BYTE alpha = static_cast<BYTE>(220 - i * 34);
+            SolidBrush logText(Color(alpha, 215, 198, 168));
+            graphics.DrawString(gApp.combatLog[index].text.c_str(), -1, &hudFont,
+                                PointF(logX + 14.0f, logY + 12.0f + i * 16.0f), &logText);
+        }
     }
 
     graphics.FillRectangle(&panel, RectF(18, static_cast<float>(gApp.height - 64), 520, 46));
