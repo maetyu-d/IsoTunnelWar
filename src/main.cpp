@@ -19,10 +19,12 @@
 
 using Gdiplus::Bitmap;
 using Gdiplus::Color;
+using Gdiplus::ColorMatrix;
 using Gdiplus::Font;
 using Gdiplus::FontFamily;
 using Gdiplus::Graphics;
 using Gdiplus::Image;
+using Gdiplus::ImageAttributes;
 using Gdiplus::LinearGradientBrush;
 using Gdiplus::Pen;
 using Gdiplus::PointF;
@@ -839,6 +841,27 @@ void DrawTunnelCell(Graphics& graphics, int x, int y, int z, bool occupied) {
     }
 }
 
+void DrawTerrainImage(Graphics& graphics, Bitmap* image, const RectF& dest) {
+    if (!image) return;
+
+    const ColorMatrix matrix = {{
+        {0.78f, 0.06f, 0.05f, 0.0f, 0.0f},
+        {0.08f, 0.48f, 0.03f, 0.0f, 0.0f},
+        {0.15f, 0.06f, 0.34f, 0.0f, 0.0f},
+        {0.0f,  0.0f,  0.0f,  1.0f, 0.0f},
+        {0.20f, 0.04f, 0.01f, 0.0f, 1.0f},
+    }};
+
+    ImageAttributes attrs;
+    attrs.SetColorMatrix(&matrix);
+    graphics.DrawImage(image, dest,
+                       0.0f, 0.0f,
+                       static_cast<Gdiplus::REAL>(image->GetWidth()),
+                       static_cast<Gdiplus::REAL>(image->GetHeight()),
+                       Gdiplus::UnitPixel,
+                       &attrs);
+}
+
 void DrawPlayerSphere(Graphics& graphics, int playerIndex, int sphereIndex) {
     const Player& player = gApp.players[playerIndex][sphereIndex];
     if (!player.alive) return;
@@ -1037,18 +1060,18 @@ void DrawScene(HDC hdc) {
         if (renderTile.anchoredToFeet) {
             const float drawW = static_cast<float>(image->GetWidth() * renderTile.scale * gApp.zoom);
             const float drawH = static_cast<float>(image->GetHeight() * renderTile.scale * gApp.zoom);
-            graphics.DrawImage(image, RectF(pos.X - drawW * 0.5f,
-                                            pos.Y + static_cast<float>(ViewHalfH() * gApp.zoom) - drawH,
-                                            drawW, drawH));
+            DrawTerrainImage(graphics, image, RectF(pos.X - drawW * 0.5f,
+                                                    pos.Y + static_cast<float>(ViewHalfH() * gApp.zoom) - drawH,
+                                                    drawW, drawH));
         } else {
             const float drawW = static_cast<float>(kSpriteW * gApp.zoom);
             const float drawH = static_cast<float>(kSpriteH * gApp.zoom);
-            graphics.DrawImage(image, RectF(pos.X + spriteOffsetX, pos.Y + spriteOffsetY,
-                                            drawW, drawH));
+            DrawTerrainImage(graphics, image, RectF(pos.X + spriteOffsetX, pos.Y + spriteOffsetY,
+                                                    drawW, drawH));
             if (!SolidBlockAt(renderTile.x, renderTile.y, renderTile.z + 1)) {
                 PointF points[4] = {PointF(), PointF(), PointF(), PointF()};
                 CellDiamondPoints(renderTile.x, renderTile.y, renderTile.z, points);
-                Pen topPen(Color(150, 235, 245, 230), 1.0f);
+                Pen topPen(Color(135, 255, 170, 92), 1.0f);
                 graphics.DrawPolygon(&topPen, points, 4);
             }
         }
